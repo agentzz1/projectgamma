@@ -57,4 +57,5 @@ Original prompt: mache eine webserver app meinetwegen in nem free tier gpu besch
   - Cesium-Assets laufen jetzt mit relativen Pfaden (`./cesium/`), damit das Projekt auch unter einem GitHub-Pages-Subpfad funktioniert.
   - Der Viewer startet ohne Default-Imagery und ohne externe Cesium-Standardlayer.
   - Der Build schreibt `.nojekyll`, damit GitHub Pages das statische Output sauber ausliefert.
-  - Naechster sinnvoller Schritt: `dist/` auf GitHub Pages publizieren und den Netlify-Altstand entsorgen.
+  - Das Repository wurde auf GitHub angelegt und der `gh-pages`-Branch mit dem Build gepusht.
+  - Live URL: `https://agentzz1.github.io/projectgamma/`

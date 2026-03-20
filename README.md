@@ -46,6 +46,7 @@ The generated config does not require any secrets.
 ## GitHub Pages deploy
 
 The site is meant to be published from the static `dist/` output.
+Live URL: `https://agentzz1.github.io/projectgamma/`
 
 ```powershell
 npm run build

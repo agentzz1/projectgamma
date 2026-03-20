@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#111c24">
+    <title>Karlsruhe Walk</title>
+    <link rel="icon" href="./favicon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="./cesium/Widgets/widgets.css">
+    <link rel="stylesheet" href="./styles.css">
+    <script>
+      window.CESIUM_BASE_URL = "./cesium/";
+    </script>
+    <script src="./runtime-config.js"></script>
+    <script src="./cesium/Cesium.js"></script>
+    <script src="./game.js" defer></script>
+  </head>
+  <body>
+    <main class="app-shell" id="app-shell">
+      <div class="backdrop-glow" aria-hidden="true"></div>
+      <div id="cesium-container" aria-label="Karlsruhe 3D Ansicht"></div>
+
+      <div class="chrome-row top-row">
+        <section class="panel location-panel" id="location-panel">
+          <span class="eyebrow">Innenstadt Kern</span>
+          <h1 id="area-name">Booting scene...</h1>
+          <p id="landmark-name">Landmarke wird geladen</p>
+          <p class="muted" id="landmark-distance">0 m</p>
+        </section>
+
+        <section class="panel status-panel" id="status-panel">
+          <span class="eyebrow">Runtime</span>
+          <div class="stat-grid">
+            <div class="stat-card">
+              <span class="stat-label">Qualitaet</span>
+              <strong id="quality-mode">Boot</strong>
+            </div>
+            <div class="stat-card">
+              <span class="stat-label">Blick</span>
+              <strong id="heading-text">S</strong>
+            </div>
+            <div class="stat-card">
+              <span class="stat-label">Tempo</span>
+              <strong id="speed-text">0.0 m/s</strong>
+            </div>
+            <div class="stat-card">
+              <span class="stat-label">Walk Mesh</span>
+              <strong id="walk-status">idle</strong>
+            </div>
+          </div>
+          <button id="reset-btn" type="button">Zurueck zum Schlossplatz</button>
+        </section>
+      </div>
+
+      <section class="panel hint-panel" id="hint-panel">
+        <span class="eyebrow">Steuerung</span>
+        <p id="hint-text">
+          W A S D laufen, Pfeiltasten drehen oder vor/zurueck, Space sprinten, M Karte, E Landmarke, F Vollbild.
+        </p>
+      </section>
+
+      <section class="panel map-panel hidden" id="map-panel">
+        <div class="map-head">
+          <span class="eyebrow">Orientierung</span>
+          <span class="map-copy">Freier Lauf innerhalb des Innenstadt-Walk-Meshs</span>
+        </div>
+        <svg id="map-svg" viewBox="0 0 280 280" aria-label="Innenstadt Karte">
+          <g id="map-zones"></g>
+          <g id="map-landmarks"></g>
+          <g id="map-player"></g>
+        </svg>
+      </section>
+
+      <section class="panel inspect-panel hidden" id="inspect-panel">
+        <span class="eyebrow">Landmarke</span>
+        <h2 id="inspect-title">Karlsruhe</h2>
+        <p id="inspect-body">Landmarken-Text wird geladen.</p>
+      </section>
+
+      <section class="start-panel" id="start-panel">
+        <div class="start-copy">
+          <span class="eyebrow">Free-Roam Karlsruhe</span>
+          <h2>Frei im Browser durch den Karlsruher Innenstadtkern laufen</h2>
+          <p>
+            Die App nutzt freie LGL-Orthophotos plus lokale 3D-Geometrie. Keine API-Keys,
+            keine bezahlten Clouds, nur freie Open-Data-Layer und freie Bewegung.
+          </p>
+        </div>
+        <div class="start-grid">
+          <div>
+            <span class="stat-label">Desktop First</span>
+            <strong>Maus + Tastatur</strong>
+          </div>
+          <div>
+            <span class="stat-label">Startbereich</span>
+            <strong>Schlossplatz</strong>
+          </div>
+          <div>
+            <span class="stat-label">Zielraum</span>
+            <strong>Marktplatz bis Ettlinger Tor</strong>
+          </div>
+          <div>
+            <span class="stat-label">Test-Fallback</span>
+            <strong>Free Open Data + lokal</strong>
+          </div>
+        </div>
+        <p class="boot-status" id="boot-status">Lade Stadtdaten und Szene...</p>
+        <button id="start-btn" type="button" disabled>Karlsruhe betreten</button>
+      </section>
+
+      <div class="source-note" id="source-note">
+        Freie Open-Data-Orthophotos plus lokale 3D-Geometrie. Keine API-Keys erforderlich.
+      </div>
+    </main>
+  </body>
+</html>

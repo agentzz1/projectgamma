@@ -1,0 +1,18 @@
+{
+  "name": "karlsruhe-walk",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Browser-based first-person Karlsruhe walking prototype.",
+  "scripts": {
+    "start": "node server.js",
+    "build": "node scripts/build.mjs",
+    "preview": "node server.js --dist"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "cesium": "^1.139.1",
+    "playwright": "^1.58.2"
+  }
+}

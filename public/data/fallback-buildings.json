@@ -1,0 +1,86 @@
+[
+  {
+    "id": "schloss_main",
+    "name": "Schloss Hauptbau",
+    "height": 28,
+    "color": "#ccb486",
+    "footprint": [[-54, 20], [54, 20], [54, 102], [-54, 102]]
+  },
+  {
+    "id": "schloss_west",
+    "name": "Schloss Westfluegel",
+    "height": 18,
+    "color": "#c5a978",
+    "footprint": [[-112, 20], [-62, 20], [-62, 92], [-112, 92]]
+  },
+  {
+    "id": "schloss_ost",
+    "name": "Schloss Ostfluegel",
+    "height": 18,
+    "color": "#c5a978",
+    "footprint": [[62, 20], [112, 20], [112, 92], [62, 92]]
+  },
+  {
+    "id": "bgh_block",
+    "name": "Nordblock",
+    "height": 22,
+    "color": "#8f8d86",
+    "footprint": [[-188, -68], [-92, -68], [-92, -212], [-188, -212]]
+  },
+  {
+    "id": "zirkel_west_block",
+    "name": "Zirkel West Block",
+    "height": 20,
+    "color": "#91877d",
+    "footprint": [[-270, -314], [-148, -314], [-148, -426], [-270, -426]]
+  },
+  {
+    "id": "zirkel_east_block",
+    "name": "Zirkel Ost Block",
+    "height": 20,
+    "color": "#91877d",
+    "footprint": [[148, -314], [270, -314], [270, -426], [148, -426]]
+  },
+  {
+    "id": "rathaus",
+    "name": "Rathaus",
+    "height": 23,
+    "color": "#b98966",
+    "footprint": [[-150, -612], [-78, -612], [-78, -506], [-150, -506]]
+  },
+  {
+    "id": "stadtkirche",
+    "name": "Stadtkirche",
+    "height": 58,
+    "color": "#d0c6b0",
+    "footprint": [[70, -602], [122, -602], [122, -510], [70, -510]]
+  },
+  {
+    "id": "marktplatz_west_block",
+    "name": "Marktplatz West Block",
+    "height": 19,
+    "color": "#8b857f",
+    "footprint": [[-288, -632], [-192, -632], [-192, -500], [-288, -500]]
+  },
+  {
+    "id": "marktplatz_east_block",
+    "name": "Marktplatz Ost Block",
+    "height": 19,
+    "color": "#8b857f",
+    "footprint": [[192, -632], [288, -632], [288, -500], [192, -500]]
+  },
+  {
+    "id": "friedrichsplatz_block",
+    "name": "Friedrichsplatz Block",
+    "height": 18,
+    "color": "#857f77",
+    "footprint": [[-286, -780], [-74, -780], [-74, -618], [-286, -618]]
+  },
+  {
+    "id": "ettlinger_tor_block",
+    "name": "Ettlinger Tor Komplex",
+    "height": 27,
+    "color": "#6b6f74",
+    "footprint": [[-130, -944], [130, -944], [130, -760], [-130, -760]]
+  }
+]

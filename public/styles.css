@@ -1,0 +1,393 @@
+:root {
+  color-scheme: dark;
+  --bg: #081119;
+  --panel: rgba(11, 24, 31, 0.78);
+  --panel-strong: rgba(9, 18, 24, 0.9);
+  --line: rgba(255, 255, 255, 0.12);
+  --text: #edf1ea;
+  --muted: #b9c2bc;
+  --accent: #d5ad62;
+  --accent-2: #7dc4bf;
+  --shadow: rgba(0, 0, 0, 0.35);
+  --display: "Georgia", "Times New Roman", serif;
+  --body: "Segoe UI", "Aptos", sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  min-height: 100%;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 20% 20%, rgba(125, 196, 191, 0.08), transparent 28%),
+    radial-gradient(circle at 80% 12%, rgba(213, 173, 98, 0.12), transparent 24%),
+    linear-gradient(180deg, #0d1b24, #04080c);
+  color: var(--text);
+  font-family: var(--body);
+}
+
+body {
+  min-height: 100vh;
+}
+
+button {
+  border: 0;
+  border-radius: 999px;
+  padding: 0.9rem 1.15rem;
+  font: inherit;
+  font-weight: 700;
+  color: #071116;
+  background: linear-gradient(135deg, #f0cf87, #b98d45);
+  box-shadow: 0 14px 32px rgba(185, 141, 69, 0.28);
+  cursor: pointer;
+  transition: transform 120ms ease, box-shadow 120ms ease, opacity 120ms ease;
+}
+
+button:hover,
+button:focus-visible {
+  transform: translateY(-1px);
+  box-shadow: 0 18px 38px rgba(185, 141, 69, 0.36);
+}
+
+button:disabled {
+  opacity: 0.55;
+  cursor: wait;
+  transform: none;
+  box-shadow: none;
+}
+
+.app-shell {
+  position: relative;
+  min-height: 100vh;
+  width: 100vw;
+  overflow: hidden;
+}
+
+.backdrop-glow {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 1;
+  background:
+    linear-gradient(180deg, rgba(3, 8, 12, 0.1) 0%, rgba(3, 8, 12, 0.55) 100%),
+    radial-gradient(circle at 50% 78%, rgba(255, 205, 130, 0.08), transparent 25%);
+}
+
+#cesium-container,
+#cesium-container .cesium-viewer,
+#cesium-container .cesium-viewer-cesiumWidgetContainer,
+#cesium-container .cesium-widget,
+#cesium-container canvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+#cesium-container {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, #1f313d, #0f171d 62%, #182023);
+}
+
+#cesium-container .cesium-viewer-toolbar,
+#cesium-container .cesium-viewer-animationContainer,
+#cesium-container .cesium-viewer-timelineContainer,
+#cesium-container .cesium-viewer-bottom {
+  display: none;
+}
+
+.chrome-row,
+.panel,
+.source-note,
+.start-panel {
+  position: absolute;
+  z-index: 3;
+}
+
+.chrome-row {
+  left: 20px;
+  right: 20px;
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.top-row {
+  top: 18px;
+  align-items: flex-start;
+}
+
+.panel {
+  border: 1px solid var(--line);
+  background: var(--panel);
+  backdrop-filter: blur(14px);
+  border-radius: 24px;
+  box-shadow: 0 18px 48px var(--shadow);
+  color: var(--text);
+}
+
+.location-panel,
+.status-panel {
+  min-width: min(380px, calc(50vw - 38px));
+  max-width: 420px;
+  padding: 18px 20px;
+}
+
+.hint-panel {
+  left: 20px;
+  bottom: 24px;
+  max-width: min(480px, calc(100vw - 40px));
+  padding: 16px 18px;
+}
+
+.map-panel {
+  right: 20px;
+  bottom: 24px;
+  width: min(320px, calc(100vw - 40px));
+  padding: 16px 16px 14px;
+}
+
+.inspect-panel {
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: min(540px, calc(100vw - 40px));
+  padding: 22px 24px;
+  background: var(--panel-strong);
+}
+
+.start-panel {
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: min(760px, calc(100vw - 36px));
+  padding: 28px;
+  border-radius: 30px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  background:
+    linear-gradient(180deg, rgba(9, 16, 21, 0.9), rgba(6, 13, 18, 0.9)),
+    radial-gradient(circle at top right, rgba(125, 196, 191, 0.14), transparent 28%);
+  box-shadow: 0 26px 80px rgba(0, 0, 0, 0.45);
+  display: grid;
+  gap: 20px;
+}
+
+.start-copy h2,
+.location-panel h1,
+.inspect-panel h2 {
+  margin: 0;
+  font-family: var(--display);
+  letter-spacing: 0.01em;
+}
+
+.start-copy h2 {
+  font-size: clamp(2rem, 5vw, 3.3rem);
+  line-height: 0.96;
+  margin-bottom: 12px;
+}
+
+.location-panel h1 {
+  font-size: clamp(1.6rem, 2.8vw, 2.45rem);
+  line-height: 0.98;
+  margin-bottom: 8px;
+}
+
+.inspect-panel h2 {
+  font-size: 2rem;
+  margin-bottom: 12px;
+}
+
+.start-copy p,
+.location-panel p,
+.hint-panel p,
+.inspect-panel p,
+.map-copy {
+  margin: 0;
+  line-height: 1.5;
+  color: var(--muted);
+}
+
+.eyebrow,
+.stat-label {
+  display: inline-block;
+  font-size: 0.72rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.eyebrow {
+  margin-bottom: 10px;
+  color: var(--accent);
+}
+
+.muted {
+  color: var(--muted);
+}
+
+.stat-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin: 8px 0 16px;
+}
+
+.stat-card,
+.start-grid > div {
+  display: grid;
+  gap: 4px;
+  padding: 12px 14px;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.stat-card strong,
+.start-grid strong {
+  font-size: 1rem;
+}
+
+.start-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.boot-status {
+  margin: 0;
+  min-height: 1.5em;
+  color: var(--accent-2);
+}
+
+.map-head {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 10px;
+}
+
+#map-svg {
+  width: 100%;
+  aspect-ratio: 1;
+  border-radius: 18px;
+  background:
+    linear-gradient(180deg, rgba(17, 30, 39, 0.9), rgba(8, 15, 20, 0.92)),
+    radial-gradient(circle at center, rgba(125, 196, 191, 0.05), transparent 50%);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+#map-zones path {
+  fill: rgba(125, 196, 191, 0.18);
+  stroke: rgba(125, 196, 191, 0.7);
+  stroke-width: 1.7;
+}
+
+#map-landmarks circle {
+  fill: rgba(213, 173, 98, 0.78);
+  stroke: rgba(255, 255, 255, 0.72);
+  stroke-width: 1.2;
+}
+
+#map-landmarks text {
+  fill: var(--text);
+  font-size: 9px;
+  font-family: var(--body);
+}
+
+#map-player path {
+  fill: #ffffff;
+  filter: drop-shadow(0 0 8px rgba(255, 255, 255, 0.25));
+}
+
+.source-note {
+  right: 20px;
+  bottom: 8px;
+  max-width: min(520px, calc(100vw - 40px));
+  padding: 7px 10px;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  color: rgba(237, 241, 234, 0.82);
+  background: rgba(9, 18, 24, 0.58);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  backdrop-filter: blur(10px);
+}
+
+.hidden {
+  display: none;
+}
+
+.status-panel button {
+  width: 100%;
+}
+
+.hint-panel p {
+  font-size: 0.96rem;
+}
+
+.inspect-panel p {
+  font-size: 1rem;
+}
+
+.cesium-credit-logoContainer {
+  filter: brightness(1.15);
+}
+
+@media (max-width: 980px) {
+  .chrome-row {
+    flex-direction: column;
+    left: 12px;
+    right: 12px;
+    top: 12px;
+  }
+
+  .location-panel,
+  .status-panel {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .hint-panel,
+  .map-panel,
+  .source-note {
+    left: 12px;
+    right: 12px;
+    max-width: none;
+  }
+
+  .map-panel {
+    bottom: 108px;
+    width: auto;
+  }
+
+  .hint-panel {
+    bottom: 54px;
+  }
+
+  .source-note {
+    bottom: 8px;
+  }
+
+  .start-panel {
+    width: calc(100vw - 24px);
+    padding: 20px;
+  }
+}
+
+@media (max-width: 720px) {
+  .start-grid,
+  .stat-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .location-panel h1 {
+    font-size: 1.4rem;
+  }
+
+  .inspect-panel {
+    width: calc(100vw - 24px);
+    padding: 18px;
+  }
+}

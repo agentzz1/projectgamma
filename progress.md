@@ -1,0 +1,60 @@
+Original prompt: mache eine webserver app meinetwegen in nem free tier gpu beschleunigt mit einem geeigneten plattform wo man im browser in Karlsruhe rumlaufen kann als Videospiel aber das soll echt wie moeglich also realitaetsnah als wuerde man selber in Karlsruhe rumlaufen also richtig echt
+
+- 2026-03-07: Repo war leer. Neuer Prototyp als eigenstaendige Browser-App geplant.
+- 2026-03-07: Cesium und Playwright lokal installiert. Cesium-Build wird lokal aus `node_modules` serviert und beim Build nach `dist/cesium` kopiert.
+- 2026-03-07: Runtime-Konfiguration ueber `/runtime-config.js` umgesetzt. Spaeter auf lokale Metadaten reduziert, damit der App-Start keine externen Keys braucht.
+- 2026-03-07: Erste frei begehbare Karlsruhe-v1 umgesetzt:
+  - Vollbildfaehige Cesium-Client-App
+  - Walk mesh fuer Schlossplatz, Karl-Friedrich-Strasse, Marktplatz, Kaiserstrasse, Friedrichsplatz, Ettlinger Tor
+  - Landmarken-Datensatz und Minimap
+  - Lokales OSM-abgeleitetes Fallback-Blockmodell ohne externe Keys
+  - `window.render_game_to_text()` und `window.advanceTime(ms)` fuer den Skill-Testclient
+- 2026-03-07: Skill-Testclient erfolgreich ausgefuehrt via `scripts/run_web_game_test.ps1`; aktuelle Artefakte liegen unter `output/web-game/`.
+- Beobachtungen:
+  - Ohne Tokens landet die App absichtlich im lokalen Fallback-Modus.
+  - Die Screenshots sind nach `preserveDrawingBuffer` nun sichtbar.
+  - Pointer-Lock wird nicht mehr automatisch beim Startbutton angefordert, um Console-Errors zu vermeiden.
+- Offene naechste sinnvolle Ausbaustufe:
+  - OSM-Fallback geometisch dichter machen (mehr Blocks, Strassenmoebel, Baumreihen).
+  - Optional Cloudflare Pages Deployment mit Build-Umgebungsvariablen einrichten.
+- 2026-03-20: Free-only-Umstellung abgeschlossen.
+  - Externe Google- und Cesium-Ion-Pfade aus Laufzeit, UI und Doku entfernt.
+  - `runtime-config.js` traegt nur noch lokale Metadaten (`freeOnly: true`, `qualityMode: local`).
+  - Der alte Google-photorealistic-TODO ist obsolet; es gibt keine benoetigten API-Keys mehr.
+- Beobachtungen:
+  - Die App laeuft jetzt bewusst nur noch im lokalen OSM-Blockmodell.
+  - Alle Hinweise sprechen jetzt klar von 100% lokal / kostenlos.
+- Offene naechste sinnvolle Ausbaustufe:
+  - OSM-Fallback geometrisch dichter machen (mehr Blocks, Strassenmoebel, Baumreihen).
+  - Optional Smoke-Test-Schritte fuer den Free-only-Modus weiter automatisieren.
+- 2026-03-20: Verifikation abgeschlossen.
+  - Web-Game-Client lief gegen `http://localhost:3000` im Free-only-Modus erfolgreich.
+  - Artefakte liegen unter `output/web-game/free-only/` und `output/web-game/free-only-boot/`.
+  - Browser-UI-Checks bestaetigt: Startseite, Map-Overlay und Inspect-Overlay funktionieren ohne externe Keys.
+- Beobachtungen:
+  - Keine Console- oder Page-Errors im finalen Lauf.
+  - `render_game_to_text()` meldet `qualityMode: local` und `mapOpen` / `inspectOpen` korrekt.
+- 2026-03-20: OpenCode-Delegation fuer projectgamma hinzugefuegt.
+  - `opencode.json` definiert vier MiMo-Free-Agenten: Orchestrator, Explorer, Builder und Reviewer.
+  - `projectgamma.opencode.md` faengt die Free-only- und Test-Loop-Regeln fuer den anderen Agenten ein.
+- 2026-03-20: Realismus-Ueberarbeitung fuer die lokale Karlsruhe-Szene gestartet.
+  - Externe ArcGIS- und Overpass-Pfade aus dem Renderpfad entfernt.
+  - Tageslicht/Himmel auf Mittag gesetzt, damit die Szene nicht mehr wie Nacht oder Weltraum wirkt.
+  - Gebaeude jetzt als Wall-plus-Roof-Aufbau mit weicheren Fassadenbanden gerendert.
+  - Strassenmoebel hinzugefuegt: Lampen, Baeume und mehr lokale Detailpunkte.
+- Beobachtungen:
+  - Die Szene wirkt deutlich besser als vorher, aber die Fassaden sind weiterhin stilisierte Platzhalter und noch keine echten Google-Earth-Photogrammetrie-Fassaden.
+  - Der groesste noch offene Realismus-Hebel waere echtes, freies Geo-/Bildmaterial oder ein sauber vorgerenderter Stadtkern-Asset-Set.
+- Verifikation:
+  - `node --check public/game.js` erfolgreich.
+  - Playwright-Screenshots nach dem Umbau erzeugt: `output/web-game/realism-check*` und `output/web-game/move-south-check`.
+  - Keine neuen Console- oder Page-Errors im Testlauf.
+- 2026-03-20: Realismus-Pass erweitert auf freie Orthophotos.
+  - Freie LGL-BW DOP20-WMS-Orthophotos als Bodenbasis eingebunden.
+  - `public/index.html` und In-UI-Texte auf "Free Open Data + lokal" umgestellt.
+  - Die Szene ist damit deutlich naeh an einer echten Stadthalterei, aber nicht mehr rein lokal.
+- 2026-03-20: GitHub-Pages-Umstellung vorbereitet.
+  - Cesium-Assets laufen jetzt mit relativen Pfaden (`./cesium/`), damit das Projekt auch unter einem GitHub-Pages-Subpfad funktioniert.
+  - Der Viewer startet ohne Default-Imagery und ohne externe Cesium-Standardlayer.
+  - Der Build schreibt `.nojekyll`, damit GitHub Pages das statische Output sauber ausliefert.
+  - Naechster sinnvoller Schritt: `dist/` auf GitHub Pages publizieren und den Netlify-Altstand entsorgen.

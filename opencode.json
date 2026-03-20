@@ -1,0 +1,48 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "default_agent": "orchestrator",
+  "model": "opencode/mimo-v2-pro-free",
+  "small_model": "opencode/mimo-v2-pro-free",
+  "instructions": ["./projectgamma.opencode.md"],
+  "agent": {
+    "orchestrator": {
+      "mode": "primary",
+      "description": "Coordinates projectgamma work and delegates to specialist agents.",
+      "model": "opencode/mimo-v2-pro-free",
+      "prompt": "You are the projectgamma orchestrator. Keep the game 100% free and local. Use the explorer for read-only analysis, the builder for focused implementation, and the reviewer for verification. Make small, safe changes and preserve the existing test loop, render_game_to_text, and advanceTime hooks."
+    },
+    "explorer": {
+      "mode": "subagent",
+      "description": "Read-only code explorer for projectgamma.",
+      "model": "opencode/mimo-v2-pro-free",
+      "prompt": "You are a read-only analysis agent for projectgamma. Inspect files, trace flows, summarize findings, and identify risks. Do not edit files.",
+      "tools": {
+        "write": false,
+        "edit": false,
+        "bash": false
+      }
+    },
+    "builder": {
+      "mode": "subagent",
+      "description": "Implementation agent for projectgamma.",
+      "model": "opencode/mimo-v2-pro-free",
+      "prompt": "You implement focused changes for projectgamma. Prefer the smallest working delta, keep the app fully free/local, and avoid touching unrelated files.",
+      "tools": {
+        "write": true,
+        "edit": true,
+        "bash": true
+      }
+    },
+    "reviewer": {
+      "mode": "subagent",
+      "description": "Verification agent for projectgamma.",
+      "model": "opencode/mimo-v2-pro-free",
+      "prompt": "You verify behavior for projectgamma. Check UI state, console errors, and text output. Do not edit files.",
+      "tools": {
+        "write": false,
+        "edit": false,
+        "bash": false
+      }
+    }
+  }
+}

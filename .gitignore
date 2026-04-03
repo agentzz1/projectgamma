@@ -4,3 +4,5 @@ output/
 netlify-dist/
 .netlify/
 *.log
+.env
+.env.local

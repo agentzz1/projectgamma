@@ -5,8 +5,8 @@
     "baseHeight": 116.2
   },
   "bounds": {
-    "minX": -470,
-    "maxX": 470,
+    "minX": -690,
+    "maxX": 690,
     "minY": -980,
     "maxY": 210
   },
@@ -35,6 +35,16 @@
       "id": "kaiserstrasse_ost",
       "label": "Kaiserstrasse Ost",
       "points": [[170, -500], [430, -500], [430, -640], [170, -640]]
+    },
+    {
+      "id": "kaiserstrasse_west_2",
+      "label": "Kaiserstrasse Richtung Europaplatz",
+      "points": [[-650, -500], [-430, -500], [-430, -640], [-650, -640]]
+    },
+    {
+      "id": "kaiserstrasse_ost_2",
+      "label": "Kaiserstrasse Richtung Durlacher Tor",
+      "points": [[430, -500], [650, -500], [650, -640], [430, -640]]
     },
     {
       "id": "friedrichsplatz",

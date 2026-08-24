@@ -6,7 +6,7 @@
     "x": 0,
     "y": 62,
     "radius": 120,
-    "description": "Das Schloss markiert den facherfoermigen Stadtgrundriss. Der Prototyp startet auf der Achse in Richtung Innenstadt."
+    "description": "Markgraf Karl Wilhelm von Baden-Durlach liess das Schloss ab 1715 als Ausgangspunkt der facherfoermigen Stadtanlage errichten - 32 Strassen laufen sternfoermig auf den Schlossturm zu. Das heutige Gebaeude ist ein Wiederaufbau nach der Zerstoerung im Zweiten Weltkrieg und beherbergt das Badische Landesmuseum."
   },
   {
     "id": "schlossplatz",
@@ -15,7 +15,7 @@
     "x": 0,
     "y": -72,
     "radius": 135,
-    "description": "Breiter Platzraum zwischen Schloss und Innenstadt. Hier soll der Startpunkt das Gefuehl einer echten Karlsruher Blickachse erzeugen."
+    "description": "Der weite Platz vor dem Schloss oeffnet den Blick auf die Fassade und den Zirkel dahinter. Er ist der noerdliche Auftakt der Karl-Friedrich-Strasse, der zentralen Sichtachse zwischen Schloss und Marktplatz."
   },
   {
     "id": "zirkel",
@@ -24,7 +24,7 @@
     "x": -160,
     "y": -365,
     "radius": 100,
-    "description": "Der Zirkel fasst den inneren Stadtbogen. In v1 dient er als seitlicher Erkundungsraum abseits der Hauptachse."
+    "description": "Der Zirkel ist der halbkreisfoermige Platz direkt suedlich des Schlossplatzes, an dem sich die Strassen des Faechers erstmals buendeln. Name und Form gehen auf den urspruenglichen Bebauungsplan Karlsruhes aus dem 18. Jahrhundert zurueck."
   },
   {
     "id": "marktplatz",
@@ -33,7 +33,7 @@
     "x": -18,
     "y": -560,
     "radius": 125,
-    "description": "Der Marktplatz ist das urbane Zentrum der v1-Route. Hier verdichten sich Rathaus, Kirche und die Kaiserstrasse."
+    "description": "Der Marktplatz wurde von Friedrich Weinbrenner um 1800 im klassizistischen Stil neu gestaltet. In seiner Mitte steht die Pyramide, die Grabstaette des Stadtgruenders Karl Wilhelm. Rathaus und evangelische Stadtkirche fassen den Platz im Weinbrenner-Stil."
   },
   {
     "id": "kaiserstrasse",
@@ -42,7 +42,7 @@
     "x": 245,
     "y": -560,
     "radius": 130,
-    "description": "Die Kaiserstrasse bildet die Ost-West-Achse der Innenstadt. Sie ist im Walk-Mesh als frei begehbarer Boulevard angelegt."
+    "description": "Die Kaiserstrasse ist die zentrale Ost-West-Einkaufsstrasse der Karlsruher Innenstadt. Seit der Eroeffnung der Kombiloesung 2021 verlaeuft die Strassenbahn unterirdisch, wodurch die Strasse zwischen Marktplatz und Europaplatz weitgehend autofrei ist."
   },
   {
     "id": "friedrichsplatz",
@@ -51,7 +51,7 @@
     "x": -190,
     "y": -700,
     "radius": 120,
-    "description": "Der Friedrichsplatz erweitert die Kernroute nach Suedwesten. Er dient als zweiter grosser Platzraum fuer freie Erkundung."
+    "description": "Der Friedrichsplatz ist eine Gruenanlage suedwestlich der Kaiserstrasse, benannt nach Grossherzog Friedrich I. Er grenzt an das Naturkundemuseum und dient als ruhiger Gegenpol zu den belebten Einkaufsstrassen."
   },
   {
     "id": "ettlinger_tor",
@@ -60,6 +60,6 @@
     "x": -8,
     "y": -870,
     "radius": 130,
-    "description": "Das Ettlinger Tor markiert den suedlichen Abschluss des v1-Innenstadtkerns und prueft, dass die Achse bis in die Suedstadt-Richtung begehbar bleibt."
+    "description": "Das Ettlinger Tor markiert den suedlichen Abschluss der Karlsruher Fussgaengerzone, dort wo einst ein Stadttor stand. Heute treffen sich hier Kaiserstrasse, Ettlinger Strasse und die Linien der Strassenbahn."
   }
 ]

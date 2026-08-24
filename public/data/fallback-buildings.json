@@ -82,5 +82,33 @@
     "height": 27,
     "color": "#6b6f74",
     "footprint": [[-130, -944], [130, -944], [130, -760], [-130, -760]]
+  },
+  {
+    "id": "kaiser_west2_block_a",
+    "name": "Ladenzeile Kaiserstrasse West",
+    "height": 16,
+    "color": "#b6a888",
+    "footprint": [[-650, -495], [-560, -495], [-560, -460], [-650, -460]]
+  },
+  {
+    "id": "kaiser_west2_block_b",
+    "name": "Ladenzeile Kaiserstrasse West Sued",
+    "height": 15,
+    "color": "#91877d",
+    "footprint": [[-650, -680], [-560, -680], [-560, -645], [-650, -645]]
+  },
+  {
+    "id": "kaiser_ost2_block_a",
+    "name": "Ladenzeile Kaiserstrasse Ost",
+    "height": 16,
+    "color": "#b6a888",
+    "footprint": [[560, -495], [650, -495], [650, -460], [560, -460]]
+  },
+  {
+    "id": "kaiser_ost2_block_b",
+    "name": "Ladenzeile Kaiserstrasse Ost Sued",
+    "height": 15,
+    "color": "#91877d",
+    "footprint": [[560, -680], [650, -680], [650, -645], [560, -645]]
   }
 ]

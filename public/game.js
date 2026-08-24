@@ -2,9 +2,9 @@
   "use strict";
 
   const QUALITY = {
-    boot: "Booting",
+    boot: "Wird geladen",
     local: "LGL orthophoto + local 3D",
-    error: "Scene error",
+    error: "Szene-Fehler",
   };
 
   const DEFAULT_POSE = { x: 0, y: -205, heading: Math.PI, pitch: -0.05 };
@@ -14,6 +14,8 @@
     "KeyB",
     "KeyD",
     "KeyS",
+    "KeyQ",
+    "KeyZ",
     "ArrowUp",
     "ArrowDown",
     "ArrowLeft",
@@ -26,6 +28,7 @@
   const state = {
     config: window.__KARLSRUHE_WALK_CONFIG__ || {},
     viewer: null,
+    resizePending: true,
     world: null,
     ready: false,
     started: false,
@@ -36,14 +39,19 @@
     pointerLocked: false,
     mapOpen: false,
     inspectOpen: false,
+    travelMenuOpen: false,
+    travelIndex: 0,
     moveBlocked: false,
     activeLandmark: null,
+    announcedLandmarkId: null,
+    announcedBlocked: false,
     currentArea: "Schlossplatz",
     textureCache: {
       building: new Map(),
       ground: new Map(),
     },
     useOrthophoto: false,
+    orthophotoFailed: false,
     frameHandle: 0,
     lastFrameTime: 0,
     fps: 0,
@@ -51,6 +59,7 @@
     fpsTimer: 0,
     time: 0,
     lastGroundSampleAt: 0,
+    lastHashUpdateAt: 0,
     groundSamplePending: false,
     landmarkEntities: [],
     player: {
@@ -61,8 +70,15 @@
       groundHeight: 116.2,
       eyeHeight: 1.72,
       speedMps: 0,
+      moveSpeed: 0,
+      lastMoveDir: { x: 0, y: 1 },
+      bobPhase: 0,
     },
     mapPlayer: null,
+    touchMove: { x: 0, y: 0 },
+    isTouch: false,
+    audio: { ctx: null, unlocked: false, muted: false, gain: null, distanceSinceStep: 0 },
+    weather: { active: false, ctx: null, drops: [] },
   };
 
   const dom = {};
@@ -73,11 +89,23 @@
   window.advanceTime = advanceTime;
 
   async function main() {
+    try {
+      state.audio.muted = localStorage.getItem("kw_muted") === "1";
+    } catch (error) {
+      state.audio.muted = false;
+    }
+
     bindDom();
     bindUi();
+    updateMuteButton();
+
+    if (!isWebglAvailable()) {
+      failBoot("Kein WebGL verfuegbar.", "Dieser Browser oder dieses Geraet unterstuetzt kein WebGL. Aktiviere Hardwarebeschleunigung oder nutze einen aktuellen Desktop-Browser.");
+      return;
+    }
 
     if (!window.Cesium) {
-      failBoot("Cesium konnte nicht geladen werden.");
+      failBoot("Cesium konnte nicht geladen werden.", "Die 3D-Engine wurde nicht gefunden. Pruefe, ob der lokale Server laeuft (npm start) und lade die Seite neu.");
       return;
     }
 
@@ -85,18 +113,26 @@
       setBootStatus("Lade Karlsruher Datensaetze...");
       await loadWorld();
       buildMiniMap();
+      buildTravelList();
       await initViewer();
       attachInput();
+      attachTouchControls();
       resetPlayerPose();
+      applySharedPositionIfPresent();
       updateHud();
       state.ready = true;
       state.mode = "ready";
       dom.startBtn.disabled = false;
+      dom.startBtn.focus();
       setBootStatus(`Szene bereit: ${QUALITY[state.qualityMode]}`);
       startLoop();
     } catch (error) {
       console.error(error);
-      failBoot(shortError(error));
+      const message = shortError(error);
+      const hint = /Failed to load/.test(message)
+        ? "Lokale Datendatei fehlt oder der Server liefert sie nicht aus. Pruefe public/data/ und starte den Server neu."
+        : "Pruefe WebGL oder lokale Dateien und lade die Seite neu.";
+      failBoot(message, hint);
     }
   }
 
@@ -107,6 +143,7 @@
     dom.startBtn = document.getElementById("start-btn");
     dom.bootStatus = document.getElementById("boot-status");
     dom.resetBtn = document.getElementById("reset-btn");
+    dom.muteBtn = document.getElementById("mute-btn");
     dom.areaName = document.getElementById("area-name");
     dom.landmarkName = document.getElementById("landmark-name");
     dom.landmarkDistance = document.getElementById("landmark-distance");
@@ -122,17 +159,54 @@
     dom.inspectPanel = document.getElementById("inspect-panel");
     dom.inspectTitle = document.getElementById("inspect-title");
     dom.inspectBody = document.getElementById("inspect-body");
+    dom.travelPanel = document.getElementById("travel-panel");
+    dom.travelList = document.getElementById("travel-list");
     dom.sourceNote = document.getElementById("source-note");
+    dom.touchMove = document.getElementById("touch-move");
+    dom.touchMoveKnob = document.getElementById("touch-move-knob");
+    dom.weatherCanvas = document.getElementById("weather-canvas");
+    dom.srStatus = document.getElementById("sr-status");
+    dom.timeSlider = document.getElementById("time-slider");
+    dom.timeLabel = document.getElementById("time-label");
+    dom.photoFlash = document.getElementById("photo-flash");
   }
 
   function bindUi() {
     dom.startBtn.addEventListener("click", startExperience);
     dom.resetBtn.addEventListener("click", resetPlayerPose);
+    dom.muteBtn.addEventListener("click", () => {
+      state.audio.muted = !state.audio.muted;
+      if (state.audio.gain) {
+        state.audio.gain.gain.value = state.audio.muted ? 0 : 0.35;
+      }
+      try {
+        localStorage.setItem("kw_muted", state.audio.muted ? "1" : "0");
+      } catch (error) {
+        // ignore storage errors (private mode, disabled storage)
+      }
+      updateMuteButton();
+    });
+    dom.timeSlider.addEventListener("input", () => applyTimeOfDay(Number(dom.timeSlider.value)));
     dom.cesiumContainer.addEventListener("click", () => {
       if (state.started && !state.inspectOpen) {
         requestPointerLock();
       }
     });
+  }
+
+  function applyTimeOfDay(hourFloat) {
+    if (!state.viewer) {
+      return;
+    }
+
+    const Cesium = window.Cesium;
+    const hour = clamp(hourFloat, 0, 23.99);
+    const wholeHour = Math.floor(hour);
+    const minute = Math.round((hour - wholeHour) * 60);
+    const iso = `2026-06-21T${String(wholeHour).padStart(2, "0")}:${String(minute).padStart(2, "0")}:00Z`;
+    state.viewer.clock.currentTime = Cesium.JulianDate.fromIso8601(iso);
+    dom.timeLabel.textContent = `${String(wholeHour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+    renderScene();
   }
 
   async function loadWorld() {
@@ -187,7 +261,7 @@
 
     state.viewer.imageryLayers.removeAll();
     try {
-      const orthophotoLayer = new Cesium.WebMapServiceImageryProvider({
+      const orthophotoProvider = new Cesium.WebMapServiceImageryProvider({
         url: "https://owsproxy.lgl-bw.de/owsproxy/ows/WMS_LGL-BW_ATKIS_DOP_20_C",
         layers: "IMAGES_DOP_20_RGB",
         parameters: {
@@ -198,7 +272,20 @@
         },
         enablePickFeatures: false,
       });
-      state.viewer.imageryLayers.addImageryProvider(orthophotoLayer);
+      let tileErrorCount = 0;
+      orthophotoProvider.errorEvent.addEventListener(() => {
+        tileErrorCount += 1;
+        if (tileErrorCount >= 6 && state.useOrthophoto && !state.orthophotoFailed) {
+          state.orthophotoFailed = true;
+          state.useOrthophoto = false;
+          state.viewer.imageryLayers.removeAll();
+          addWalkSurfaces(0.88);
+          state.qualityError = "Freie Orthophotos nicht erreichbar, nutze lokales Bodenmodell.";
+          updateSourceNote();
+          console.warn("Orthophoto tiles failed repeatedly, switched to local ground texture.");
+        }
+      });
+      state.viewer.imageryLayers.addImageryProvider(orthophotoProvider);
       state.useOrthophoto = true;
     } catch (error) {
       console.warn("Orthophoto layer failed, falling back to local surfaces:", error);
@@ -382,6 +469,75 @@
     trees.forEach((point, index) => {
       addStreetTree(point[0], point[1], index);
     });
+
+    const benches = [
+      [-90, 150, 0], [90, 150, Math.PI],
+      [-140, -40, Math.PI / 2], [140, -40, -Math.PI / 2],
+      [-60, -520, 0], [60, -520, Math.PI],
+    ];
+    const bikeRacks = [
+      [-100, -495, 0], [100, -495, 0],
+      [-380, -560, Math.PI / 2], [380, -560, -Math.PI / 2],
+    ];
+
+    benches.forEach((p, i) => addBench(p[0], p[1], p[2], i));
+    bikeRacks.forEach((p, i) => addBikeRack(p[0], p[1], p[2], i));
+  }
+
+  function addBench(x, y, heading, index) {
+    const Cesium = window.Cesium;
+    const ground = estimateGroundHeight(x, y);
+    const orientation = Cesium.Transforms.headingPitchRollQuaternion(
+      localToCartesian(x, y, ground),
+      new Cesium.HeadingPitchRoll(heading, 0, 0)
+    );
+    const woodColor = Cesium.Color.fromCssColorString(index % 2 === 0 ? "#6b4a30" : "#5a3d28").withAlpha(0.97);
+
+    state.viewer.entities.add({
+      position: localToCartesian(x, y, ground + 0.46),
+      orientation,
+      box: {
+        // dimensions.y is the long (1.7m) seat axis: at heading 0 the box-local Y axis
+        // aligns with the heading vector (compass north), so the seat runs along heading.
+        dimensions: new Cesium.Cartesian3(0.46, 1.7, 0.06),
+        material: woodColor,
+      },
+    });
+
+    state.viewer.entities.add({
+      position: localToCartesian(x, y, ground + 0.72),
+      orientation,
+      box: {
+        dimensions: new Cesium.Cartesian3(0.06, 1.7, 0.5),
+        material: Cesium.Color.fromCssColorString("#33383a").withAlpha(0.97),
+      },
+    });
+  }
+
+  function addBikeRack(x, y, heading, index) {
+    const Cesium = window.Cesium;
+    const ground = estimateGroundHeight(x, y);
+    const dir = { x: Math.cos(heading), y: -Math.sin(heading) };
+    const metalColor = Cesium.Color.fromCssColorString("#7a8085").withAlpha(0.97);
+
+    for (let i = 0; i < 4; i += 1) {
+      const offset = (i - 1.5) * 0.55;
+      const px = x + dir.x * offset;
+      const py = y + dir.y * offset;
+      const orientation = Cesium.Transforms.headingPitchRollQuaternion(
+        localToCartesian(px, py, ground),
+        new Cesium.HeadingPitchRoll(heading, 0, 0)
+      );
+
+      state.viewer.entities.add({
+        position: localToCartesian(px, py, ground + 0.45),
+        orientation,
+        box: {
+          dimensions: new Cesium.Cartesian3(0.04, 0.5, 0.9),
+          material: metalColor,
+        },
+      });
+    }
   }
 
   function addLampPost(x, y, index) {
@@ -445,11 +601,13 @@
     document.addEventListener("mousemove", onMouseMove);
     window.addEventListener("keydown", onKeyDown, { passive: false });
     window.addEventListener("keyup", onKeyUp, { passive: false });
-    window.addEventListener("resize", renderScene);
+    window.addEventListener("resize", () => {
+      state.resizePending = true;
+    });
   }
 
   function onMouseMove(event) {
-    if (!state.pointerLocked || !state.started || state.inspectOpen) {
+    if (!state.pointerLocked || !state.started || state.inspectOpen || state.travelMenuOpen) {
       return;
     }
 
@@ -457,7 +615,97 @@
     state.player.pitch = clamp(state.player.pitch - event.movementY * 0.0018, -1.08, 0.48);
   }
 
+  function attachTouchControls() {
+    state.isTouch = window.matchMedia("(pointer: coarse)").matches || "ontouchstart" in window;
+    if (!state.isTouch) {
+      return;
+    }
+
+    dom.touchMove.classList.remove("hidden");
+
+    let moveTouchId = null;
+    let lookTouchId = null;
+    let lastLookX = 0;
+    let lastLookY = 0;
+
+    const padRadius = 40;
+
+    function updatePad(touch) {
+      const rect = dom.touchMove.getBoundingClientRect();
+      const centerX = rect.left + rect.width / 2;
+      const centerY = rect.top + rect.height / 2;
+      let dx = touch.clientX - centerX;
+      let dy = touch.clientY - centerY;
+      const dist = Math.hypot(dx, dy);
+      if (dist > padRadius) {
+        dx = (dx / dist) * padRadius;
+        dy = (dy / dist) * padRadius;
+      }
+      state.touchMove.x = dx / padRadius;
+      state.touchMove.y = dy / padRadius;
+      dom.touchMoveKnob.style.transform = `translate(${dx.toFixed(1)}px, ${dy.toFixed(1)}px)`;
+    }
+
+    dom.touchMove.addEventListener("touchstart", (event) => {
+      if (moveTouchId !== null) return;
+      const touch = event.changedTouches[0];
+      moveTouchId = touch.identifier;
+      updatePad(touch);
+      event.preventDefault();
+    }, { passive: false });
+
+    dom.touchMove.addEventListener("touchmove", (event) => {
+      const touch = Array.from(event.changedTouches).find((t) => t.identifier === moveTouchId);
+      if (!touch) return;
+      updatePad(touch);
+      event.preventDefault();
+    }, { passive: false });
+
+    const releasePad = (event) => {
+      const touch = Array.from(event.changedTouches).find((t) => t.identifier === moveTouchId);
+      if (!touch) return;
+      moveTouchId = null;
+      state.touchMove.x = 0;
+      state.touchMove.y = 0;
+      dom.touchMoveKnob.style.transform = "translate(0px, 0px)";
+    };
+    dom.touchMove.addEventListener("touchend", releasePad);
+    dom.touchMove.addEventListener("touchcancel", releasePad);
+
+    dom.cesiumContainer.addEventListener("touchstart", (event) => {
+      if (dom.touchMove.contains(event.target) || lookTouchId !== null) return;
+      const touch = event.changedTouches[0];
+      lookTouchId = touch.identifier;
+      lastLookX = touch.clientX;
+      lastLookY = touch.clientY;
+    }, { passive: true });
+
+    dom.cesiumContainer.addEventListener("touchmove", (event) => {
+      const touch = Array.from(event.changedTouches).find((t) => t.identifier === lookTouchId);
+      if (!touch || !state.started || state.inspectOpen || state.travelMenuOpen) return;
+      const dx = touch.clientX - lastLookX;
+      const dy = touch.clientY - lastLookY;
+      lastLookX = touch.clientX;
+      lastLookY = touch.clientY;
+      state.player.heading = normalizeAngle(state.player.heading + dx * 0.0045);
+      state.player.pitch = clamp(state.player.pitch - dy * 0.0035, -1.08, 0.48);
+    }, { passive: true });
+
+    const releaseLook = (event) => {
+      const touch = Array.from(event.changedTouches).find((t) => t.identifier === lookTouchId);
+      if (touch) lookTouchId = null;
+    };
+    dom.cesiumContainer.addEventListener("touchend", releaseLook);
+    dom.cesiumContainer.addEventListener("touchcancel", releaseLook);
+  }
+
   function onKeyDown(event) {
+    const activeTag = document.activeElement && document.activeElement.tagName;
+    const isFormControlFocused = activeTag === "INPUT" || activeTag === "SELECT" || activeTag === "TEXTAREA";
+    if (isFormControlFocused && MOVEMENT_KEYS.has(event.code)) {
+      return;
+    }
+
     if (MOVEMENT_KEYS.has(event.code) || event.code === "Enter" || event.code === "KeyM") {
       event.preventDefault();
     }
@@ -465,6 +713,29 @@
     if (!state.started && (event.code === "Enter" || event.code === "Space")) {
       startExperience();
       return;
+    }
+
+    if (event.code === "KeyL") {
+      toggleTravelMenu();
+      return;
+    }
+    if (state.travelMenuOpen) {
+      if (event.code === "ArrowDown") {
+        state.travelIndex = (state.travelIndex + 1) % state.world.landmarks.length;
+        highlightTravelIndex(state.travelIndex);
+        event.preventDefault();
+        return;
+      }
+      if (event.code === "ArrowUp") {
+        state.travelIndex = (state.travelIndex - 1 + state.world.landmarks.length) % state.world.landmarks.length;
+        highlightTravelIndex(state.travelIndex);
+        event.preventDefault();
+        return;
+      }
+      if (event.code === "Enter") {
+        teleportToLandmark(state.travelIndex);
+        return;
+      }
     }
 
     if (event.code === "Enter") {
@@ -478,7 +749,9 @@
     }
 
     if (event.code === "KeyE") {
-      toggleInspect();
+      if (!state.travelMenuOpen) {
+        toggleInspect();
+      }
       return;
     }
 
@@ -487,11 +760,23 @@
       return;
     }
 
+    if (event.code === "KeyP") {
+      capturePhoto();
+      return;
+    }
+
+    if (event.code === "KeyR") {
+      toggleRain();
+      return;
+    }
+
     if (event.code === "Escape") {
       if (state.inspectOpen) {
         closeInspect();
       } else if (state.mapOpen) {
         toggleMap(false);
+      } else if (state.travelMenuOpen) {
+        toggleTravelMenu(false);
       }
       return;
     }
@@ -504,6 +789,7 @@
   }
 
   function startExperience() {
+    unlockAudio();
     if (!state.ready) {
       return;
     }
@@ -511,7 +797,49 @@
     state.started = true;
     state.mode = "explore";
     dom.startPanel.classList.add("hidden");
+    dom.cesiumContainer.focus();
     updateHint();
+  }
+
+  function unlockAudio() {
+    if (!state.audio.ctx) {
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      if (AudioCtx) {
+        state.audio.ctx = new AudioCtx();
+        state.audio.gain = state.audio.ctx.createGain();
+        state.audio.gain.gain.value = state.audio.muted ? 0 : 0.35;
+        state.audio.gain.connect(state.audio.ctx.destination);
+        state.audio.unlocked = true;
+      }
+    }
+    if (state.audio.ctx && state.audio.ctx.state === "suspended") {
+      state.audio.ctx.resume().catch(() => {});
+    }
+  }
+
+  function playFootstep() {
+    if (!state.audio.ctx || state.audio.muted) {
+      return;
+    }
+
+    const ctx = state.audio.ctx;
+    const bufferSize = Math.floor(ctx.sampleRate * 0.09);
+    const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < bufferSize; i += 1) {
+      data[i] = (Math.random() * 2 - 1) * (1 - i / bufferSize);
+    }
+
+    const source = ctx.createBufferSource();
+    source.buffer = buffer;
+
+    const filter = ctx.createBiquadFilter();
+    filter.type = "lowpass";
+    filter.frequency.value = 900 + Math.random() * 300;
+
+    source.connect(filter);
+    filter.connect(state.audio.gain);
+    source.start();
   }
 
   function requestPointerLock() {
@@ -529,10 +857,89 @@
     document.exitFullscreen?.().catch(() => {});
   }
 
+  function capturePhoto() {
+    if (!state.viewer || !state.started) {
+      return;
+    }
+
+    state.viewer.render();
+    let dataUrl;
+    try {
+      dataUrl = state.viewer.canvas.toDataURL("image/png");
+    } catch (error) {
+      console.warn("Photo capture failed:", error);
+      return;
+    }
+
+    const link = document.createElement("a");
+    link.href = dataUrl;
+    link.download = `karlsruhe-walk-${Date.now()}.png`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+
+    dom.photoFlash.classList.add("active");
+    setTimeout(() => dom.photoFlash.classList.remove("active"), 140);
+  }
+
   function toggleMap(forceValue) {
     state.mapOpen = typeof forceValue === "boolean" ? forceValue : !state.mapOpen;
     dom.mapPanel.classList.toggle("hidden", !state.mapOpen);
     updateHint();
+    announce(state.mapOpen ? "Karte geoeffnet." : "Karte geschlossen.");
+  }
+
+  function toggleRain(forceValue) {
+    state.weather.active = typeof forceValue === "boolean" ? forceValue : !state.weather.active;
+    dom.weatherCanvas.classList.toggle("active", state.weather.active);
+    if (state.weather.active && !state.weather.ctx) {
+      initRain();
+    }
+  }
+
+  function initRain() {
+    dom.weatherCanvas.width = window.innerWidth;
+    dom.weatherCanvas.height = window.innerHeight;
+    state.weather.ctx = dom.weatherCanvas.getContext("2d");
+    state.weather.drops = [];
+    for (let i = 0; i < 220; i += 1) {
+      state.weather.drops.push({
+        x: Math.random() * dom.weatherCanvas.width,
+        y: Math.random() * dom.weatherCanvas.height,
+        length: 10 + Math.random() * 14,
+        speed: 380 + Math.random() * 260,
+        drift: -30 + Math.random() * 60,
+      });
+    }
+    window.addEventListener("resize", () => {
+      if (state.weather.active) {
+        dom.weatherCanvas.width = window.innerWidth;
+        dom.weatherCanvas.height = window.innerHeight;
+      }
+    });
+  }
+
+  function updateRain(deltaSeconds) {
+    if (!state.weather.active || !state.weather.ctx) {
+      return;
+    }
+    const canvas = dom.weatherCanvas;
+    const ctx = state.weather.ctx;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.strokeStyle = "rgba(214, 232, 255, 0.55)";
+    ctx.lineWidth = 1;
+    state.weather.drops.forEach((drop) => {
+      drop.y += drop.speed * deltaSeconds;
+      drop.x += drop.drift * deltaSeconds;
+      if (drop.y > canvas.height) {
+        drop.y = -drop.length;
+        drop.x = Math.random() * canvas.width;
+      }
+      ctx.beginPath();
+      ctx.moveTo(drop.x, drop.y);
+      ctx.lineTo(drop.x + drop.drift * 0.03, drop.y + drop.length);
+      ctx.stroke();
+    });
   }
 
   function toggleInspect() {
@@ -547,18 +954,61 @@
       dom.inspectTitle.textContent = state.activeLandmark.name;
       dom.inspectBody.textContent = state.activeLandmark.description;
       state.mode = "inspect";
+      dom.inspectPanel.focus();
     } else {
       state.mode = "explore";
+      dom.cesiumContainer.focus();
     }
 
     updateHint();
+    announce(state.inspectOpen ? `Landmarke geoeffnet: ${state.activeLandmark.name}.` : "Landmarke geschlossen.");
   }
 
   function closeInspect() {
     state.inspectOpen = false;
     dom.inspectPanel.classList.add("hidden");
+    dom.cesiumContainer.focus();
     state.mode = state.started ? "explore" : "ready";
     updateHint();
+  }
+
+  function buildTravelList() {
+    dom.travelList.textContent = "";
+    state.world.landmarks.forEach((landmark, index) => {
+      const item = document.createElement("li");
+      item.textContent = landmark.name;
+      item.addEventListener("click", () => teleportToLandmark(index));
+      dom.travelList.appendChild(item);
+    });
+  }
+
+  function toggleTravelMenu(forceValue) {
+    state.travelMenuOpen = typeof forceValue === "boolean" ? forceValue : !state.travelMenuOpen;
+    dom.travelPanel.classList.toggle("hidden", !state.travelMenuOpen);
+    if (state.travelMenuOpen) {
+      highlightTravelIndex(state.travelIndex);
+    }
+    updateHint();
+  }
+
+  function highlightTravelIndex(index) {
+    dom.travelList.querySelectorAll("li").forEach((item, itemIndex) => {
+      item.classList.toggle("active", itemIndex === index);
+    });
+  }
+
+  function teleportToLandmark(index) {
+    const landmark = state.world.landmarks[index];
+    if (!landmark) {
+      return;
+    }
+    state.player.x = landmark.x;
+    state.player.y = landmark.y;
+    state.player.groundHeight = estimateGroundHeight(landmark.x, landmark.y);
+    state.player.speedMps = 0;
+    updateWorldState();
+    updateCamera();
+    toggleTravelMenu(false);
   }
 
   function resetPlayerPose() {
@@ -567,6 +1017,8 @@
     state.player.heading = DEFAULT_POSE.heading;
     state.player.pitch = DEFAULT_POSE.pitch;
     state.player.speedMps = 0;
+    state.player.moveSpeed = 0;
+    state.player.bobPhase = 0;
     state.player.groundHeight = estimateGroundHeight(DEFAULT_POSE.x, DEFAULT_POSE.y);
     state.mapOpen = false;
     state.inspectOpen = false;
@@ -577,6 +1029,27 @@
     updateWorldState();
     updateCamera();
     renderScene();
+  }
+
+  function applySharedPositionIfPresent() {
+    const match = /^#pos=(-?[\d.]+),(-?[\d.]+),(-?[\d.]+),(-?[\d.]+)$/.exec(location.hash);
+    if (!match) return;
+    const x = Number(match[1]);
+    const y = Number(match[2]);
+    const headingDeg = Number(match[3]);
+    const pitchDeg = Number(match[4]);
+    if (![x, y, headingDeg, pitchDeg].every(Number.isFinite)) return;
+    if (!insideWalkMesh(x, y)) {
+      console.warn("Shared position outside walk mesh, ignoring URL hash.");
+      return;
+    }
+    state.player.x = x;
+    state.player.y = y;
+    state.player.heading = normalizeAngle((headingDeg * Math.PI) / 180);
+    state.player.pitch = clamp((pitchDeg * Math.PI) / 180, -1.08, 0.48);
+    state.player.groundHeight = estimateGroundHeight(x, y);
+    updateWorldState();
+    updateCamera();
   }
 
   function startLoop() {
@@ -597,8 +1070,9 @@
   function step(deltaSeconds) {
     state.time += deltaSeconds;
     trackFps(deltaSeconds);
+    updateRain(deltaSeconds);
 
-    if (!state.ready || !state.started || state.inspectOpen || state.mapOpen) {
+    if (!state.ready || !state.started || state.inspectOpen || state.mapOpen || state.travelMenuOpen) {
       state.player.speedMps = 0;
       updateWorldState();
       return;
@@ -606,14 +1080,21 @@
 
     const intent = getIntent();
     state.player.heading = normalizeAngle(state.player.heading + intent.turn * 1.65 * deltaSeconds);
+    state.player.pitch = clamp(state.player.pitch + intent.pitch * 1.1 * deltaSeconds, -1.08, 0.48);
 
     const moveLength = Math.hypot(intent.move.x, intent.move.y);
-    const speed = intent.sprint ? 5.3 : 2.45;
+    const targetSpeed = moveLength > 0 ? (intent.sprint ? 5.3 : 2.45) : 0;
+    const rate = targetSpeed > state.player.moveSpeed ? 8 : 13;
+    state.player.moveSpeed = approachValue(state.player.moveSpeed, targetSpeed, rate * deltaSeconds);
     let traveled = 0;
 
     if (moveLength > 0) {
-      const dx = (intent.move.x / moveLength) * speed * deltaSeconds;
-      const dy = (intent.move.y / moveLength) * speed * deltaSeconds;
+      state.player.lastMoveDir = { x: intent.move.x / moveLength, y: intent.move.y / moveLength };
+    }
+
+    if (state.player.moveSpeed > 0.001) {
+      const dx = state.player.lastMoveDir.x * state.player.moveSpeed * deltaSeconds;
+      const dy = state.player.lastMoveDir.y * state.player.moveSpeed * deltaSeconds;
       const proposedX = clamp(
         state.player.x + dx,
         state.world.bounds.minX,
@@ -629,31 +1110,58 @@
       state.player.x = resolved.x;
       state.player.y = resolved.y;
       state.moveBlocked = resolved.blocked;
+      if (resolved.blocked) {
+        state.player.moveSpeed = 0;
+      }
     } else {
       state.moveBlocked = false;
     }
 
+    if (state.moveBlocked && !state.announcedBlocked) {
+      announce("Rand des begehbaren Bereichs erreicht.");
+    }
+    state.announcedBlocked = state.moveBlocked;
+
+    state.player.bobPhase += traveled * 1.7;
     state.player.speedMps = deltaSeconds > 0 ? traveled / deltaSeconds : 0;
+    if (traveled > 0 && !state.moveBlocked) {
+      state.audio.distanceSinceStep = (state.audio.distanceSinceStep || 0) + traveled;
+      if (state.audio.distanceSinceStep >= 0.72) {
+        state.audio.distanceSinceStep -= 0.72;
+        playFootstep();
+      }
+    }
     updateGroundHeight();
     updateWorldState();
     updateCamera();
+    if (state.time - state.lastHashUpdateAt > 1) {
+      state.lastHashUpdateAt = state.time;
+      const headingDeg = Math.round(toDeg(state.player.heading));
+      const pitchDeg = Math.round(toDeg(state.player.pitch));
+      const hash = `#pos=${state.player.x.toFixed(1)},${state.player.y.toFixed(1)},${headingDeg},${pitchDeg}`;
+      history.replaceState(null, "", hash);
+    }
   }
 
   function getIntent() {
-    const forward =
+    const keyForward =
       (state.keys.has("KeyW") || state.keys.has("ArrowUp") ? 1 : 0) -
       (state.keys.has("KeyS") || state.keys.has("ArrowDown") ? 1 : 0);
-    const strafe =
+    const keyStrafe =
       (state.keys.has("KeyD") || state.keys.has("KeyB") ? 1 : 0) -
       (state.keys.has("KeyA") ? 1 : 0);
+    const forward = clamp(keyForward - state.touchMove.y, -1, 1);
+    const strafe = clamp(keyStrafe + state.touchMove.x, -1, 1);
     const turn =
       (state.keys.has("ArrowRight") ? 1 : 0) -
       (state.keys.has("ArrowLeft") ? 1 : 0);
+    const pitchIntent = (state.keys.has("KeyQ") ? 1 : 0) - (state.keys.has("KeyZ") ? 1 : 0);
     const forwardVector = { x: Math.sin(state.player.heading), y: Math.cos(state.player.heading) };
     const rightVector = { x: Math.cos(state.player.heading), y: -Math.sin(state.player.heading) };
 
     return {
       turn,
+      pitch: pitchIntent,
       sprint: state.keys.has("ShiftLeft") || state.keys.has("ShiftRight") || state.keys.has("Space"),
       move: {
         x: forwardVector.x * forward + rightVector.x * strafe,
@@ -666,11 +1174,29 @@
     if (insideWalkMesh(toX, toY)) {
       return { x: toX, y: toY, blocked: false };
     }
-    if (insideWalkMesh(toX, fromY)) {
-      return { x: toX, y: fromY, blocked: true };
+    let lo = 0;
+    let hi = 1;
+    for (let i = 0; i < 8; i += 1) {
+      const mid = (lo + hi) / 2;
+      const mx = fromX + (toX - fromX) * mid;
+      const my = fromY + (toY - fromY) * mid;
+      if (insideWalkMesh(mx, my)) {
+        lo = mid;
+      } else {
+        hi = mid;
+      }
     }
-    if (insideWalkMesh(fromX, toY)) {
-      return { x: fromX, y: toY, blocked: true };
+    const clippedX = fromX + (toX - fromX) * lo;
+    const clippedY = fromY + (toY - fromY) * lo;
+
+    if (insideWalkMesh(toX, clippedY)) {
+      return { x: toX, y: clippedY, blocked: true };
+    }
+    if (insideWalkMesh(clippedX, toY)) {
+      return { x: clippedX, y: toY, blocked: true };
+    }
+    if (lo > 0) {
+      return { x: clippedX, y: clippedY, blocked: true };
     }
     return { x: fromX, y: fromY, blocked: true };
   }
@@ -692,6 +1218,14 @@
     });
 
     state.activeLandmark = nearest;
+    if (nearest && nearest.distance <= nearest.radius + 36) {
+      if (nearest.id !== state.announcedLandmarkId) {
+        announce(`In der Naehe: ${nearest.name}. Taste E oeffnet Details.`);
+        state.announcedLandmarkId = nearest.id;
+      }
+    } else {
+      state.announcedLandmarkId = null;
+    }
     const zone = state.world.zones.find((candidate) => pointInPolygon(state.player.x, state.player.y, candidate.points));
     state.currentArea = zone ? zone.label : nearest ? nearest.areaName : "Innenstadt Kern";
   }
@@ -701,11 +1235,16 @@
       return;
     }
 
+    const bobAmount = clamp(state.player.speedMps / 5.3, 0, 1);
+    const bobVertical = Math.sin(state.player.bobPhase * 2) * 0.045 * bobAmount;
+    const bobLateral = Math.sin(state.player.bobPhase) * 0.03 * bobAmount;
+    const right = { x: Math.cos(state.player.heading), y: -Math.sin(state.player.heading) };
+
     state.viewer.camera.setView({
       destination: localToCartesian(
-        state.player.x,
-        state.player.y,
-        state.player.groundHeight + state.player.eyeHeight
+        state.player.x + right.x * bobLateral,
+        state.player.y + right.y * bobLateral,
+        state.player.groundHeight + state.player.eyeHeight + bobVertical
       ),
       orientation: {
         heading: state.player.heading,
@@ -720,7 +1259,10 @@
       return;
     }
 
-    state.viewer.resize();
+    if (state.resizePending) {
+      state.viewer.resize();
+      state.resizePending = false;
+    }
     state.viewer.render();
     updateHud();
   }
@@ -736,12 +1278,12 @@
     dom.speedText.textContent = `${state.player.speedMps.toFixed(1)} m/s`;
     dom.headingText.textContent = `${headingLabel(state.player.heading)} | ${Math.round(toDeg(state.player.heading))}deg`;
     dom.walkStatus.textContent = state.moveBlocked
-      ? "edge"
+      ? "Rand"
       : state.started
         ? state.player.speedMps > 0.05
-          ? "walking"
-          : "idle"
-        : "ready";
+          ? "laeuft"
+          : "steht"
+        : "bereit";
 
     if (state.inspectOpen && state.activeLandmark) {
       dom.inspectTitle.textContent = state.activeLandmark.name;
@@ -759,18 +1301,33 @@
       hints.push("Klick auf Start oder druecke Enter.");
     } else if (state.inspectOpen) {
       hints.push("E oder Escape schliesst die Landmarke. Enter setzt den Startpunkt neu.");
+    } else if (state.travelMenuOpen) {
+      hints.push("Pfeil hoch runter waehlt, Enter springt zur Landmarke, L oder Escape schliesst.");
     } else {
       hints.push(state.pointerLocked ? "Mausblick aktiv." : "Klicke in die Szene fuer Mausblick.");
       hints.push("Pfeiltasten drehen oder laufen, W A S D fuer freie Schritte, Space sprintet.");
+      hints.push("L oeffnet die Ziel-Liste.");
       if (state.activeLandmark && state.activeLandmark.distance <= state.activeLandmark.radius + 36) {
         hints.push(`E oeffnet ${state.activeLandmark.name}.`);
       }
       if (state.moveBlocked) {
         hints.push("Walk-Mesh-Rand erreicht.");
       }
+      hints.push("R schaltet Regen ein/aus.");
+      hints.push("P speichert ein Foto.");
     }
 
     dom.hintText.textContent = hints.join(" ");
+  }
+
+  function updateMuteButton() {
+    dom.muteBtn.textContent = state.audio.muted ? "Ton aus" : "Ton an";
+    dom.muteBtn.setAttribute("aria-pressed", state.audio.muted ? "true" : "false");
+  }
+
+  function announce(text) {
+    if (!dom.srStatus || dom.srStatus.textContent === text) return;
+    dom.srStatus.textContent = text;
   }
 
   function buildMiniMap() {
@@ -891,11 +1448,11 @@
   }
 
   function zoneColor(id) {
-    if (id.includes("schloss")) return "#6d7f6a";
-    if (id.includes("kaiser")) return "#5f6975";
-    if (id.includes("marktplatz")) return "#6f665f";
-    if (id.includes("ettlinger")) return "#5e6463";
-    return "#4e6468";
+    if (id.includes("schloss")) return "#8a9b6e";
+    if (id.includes("kaiser")) return "#6b7a8c";
+    if (id.includes("marktplatz")) return "#a8875f";
+    if (id.includes("ettlinger")) return "#7d6f8a";
+    return "#5c8a7a";
   }
 
   function getGroundMaterial(zone, alpha) {
@@ -920,23 +1477,22 @@
 
   function getBuildingMaterial(building) {
     const Cesium = window.Cesium;
+    const theme = buildingTheme(building.id, building.height);
+    const textureKey = `${theme}:${building.color || "#9b8c77"}`;
 
-    if (!state.textureCache.building.has(building.id)) {
-      const texture = createBuildingTexture(building);
-      const bounds = polygonBounds(building.footprint);
-      const repeat = textureRepeat(bounds.width, bounds.height, 42, 16);
-      const heightRepeat = clamp(Math.round(building.height / 9), 1, 6);
-
-      state.textureCache.building.set(
-        building.id,
-        new Cesium.ImageMaterialProperty({
-          image: texture,
-          repeat: new Cesium.Cartesian2(repeat.x, Math.max(repeat.y, heightRepeat)),
-        })
-      );
+    if (!state.textureCache.building.has(textureKey)) {
+      state.textureCache.building.set(textureKey, createBuildingTexture(building));
     }
+    const texture = state.textureCache.building.get(textureKey);
 
-    return state.textureCache.building.get(building.id);
+    const bounds = polygonBounds(building.footprint);
+    const repeat = textureRepeat(bounds.width, bounds.height, 42, 16);
+    const heightRepeat = clamp(Math.round(building.height / 9), 1, 6);
+
+    return new Cesium.ImageMaterialProperty({
+      image: texture,
+      repeat: new Cesium.Cartesian2(repeat.x, Math.max(repeat.y, heightRepeat)),
+    });
   }
 
   function createGroundTexture(zone, alpha) {
@@ -995,9 +1551,9 @@
       return canvas;
     }
 
-    const rng = mulberry32(hashString(`building:${building.id}`));
-    const base = hexToRgb(building.color || "#9b8c77");
     const theme = buildingTheme(building.id, building.height);
+    const rng = mulberry32(hashString(`building:${theme}:${building.color || "#9b8c77"}`));
+    const base = hexToRgb(building.color || "#9b8c77");
     const top = tintColor(base, theme === "palace" ? 0.22 : theme === "stone" ? 0.18 : 0.14);
     const mid = tintColor(base, theme === "palace" ? 0.06 : 0.02);
     const bottom = tintColor(base, -0.18);
@@ -1128,12 +1684,13 @@
   }
 
   function drawFacadeWindows(ctx, canvas, rng, theme) {
+    const shopBandTop = canvas.height * (theme === "block" ? 0.82 : 0.86);
     const columns = theme === "palace" ? 6 : theme === "tower" ? 6 : 8;
     const rows = theme === "palace" ? 8 : theme === "tower" ? 10 : 10;
     const paddingX = theme === "palace" ? 36 : 26;
     const paddingY = theme === "palace" ? 30 : 22;
     const spacingX = (canvas.width - paddingX * 2) / columns;
-    const spacingY = (canvas.height - paddingY * 2) / rows;
+    const spacingY = (shopBandTop - paddingY * 2) / rows;
 
     for (let row = 0; row < rows; row += 1) {
       for (let col = 0; col < columns; col += 1) {
@@ -1150,10 +1707,38 @@
         ctx.fillStyle = glass;
         ctx.fillRect(x + 3, y + 4, width - 6, height - 8);
 
+        ctx.fillStyle = frame;
+        ctx.fillRect(x + width / 2 - 1, y + 2, 2, height - 4);
+        if (theme !== "tower") ctx.fillRect(x + 3, y + height / 2 - 1, width - 6, 2);
+
         if (theme !== "palace" && rng() > 0.45) {
           ctx.fillStyle = "rgba(255,255,255,0.035)";
           ctx.fillRect(x + width * 0.45, y + 2, width * 0.12, height - 4);
         }
+      }
+    }
+
+    if (theme !== "palace") {
+      const shopCount = theme === "block" ? 3 : 2;
+      const shopGap = 12;
+      const shopSpacing = (canvas.width - paddingX * 2) / shopCount;
+      const shopTop = shopBandTop + 6;
+      const shopHeight = canvas.height - shopTop - 20;
+
+      for (let i = 0; i < shopCount; i += 1) {
+        const x = paddingX + i * shopSpacing + shopGap / 2;
+        const width = shopSpacing - shopGap;
+        const lit = rng() > 0.3;
+        const frame = lit ? "rgba(247,236,204,0.9)" : "rgba(24,28,30,0.86)";
+        const glass = lit ? "rgba(223, 206, 149, 0.58)" : "rgba(66, 74, 76, 0.6)";
+
+        ctx.fillStyle = frame;
+        ctx.fillRect(x, shopTop, width, shopHeight);
+        ctx.fillStyle = glass;
+        ctx.fillRect(x + 4, shopTop + 4, width - 8, shopHeight - 8);
+
+        ctx.fillStyle = frame;
+        ctx.fillRect(x + width / 2 - 1, shopTop + 3, 2, shopHeight - 6);
       }
     }
 
@@ -1338,6 +1923,7 @@
           pointerLocked: state.pointerLocked,
           mapOpen: state.mapOpen,
           inspectOpen: state.inspectOpen,
+          travelMenuOpen: state.travelMenuOpen,
         },
         fps: round(state.fps, 1),
       },
@@ -1381,16 +1967,25 @@
     dom.bootStatus.textContent = text;
   }
 
-  function failBoot(text) {
+  function isWebglAvailable() {
+    try {
+      const canvas = document.createElement("canvas");
+      return Boolean(canvas.getContext("webgl2") || canvas.getContext("webgl") || canvas.getContext("experimental-webgl"));
+    } catch (error) {
+      return false;
+    }
+  }
+
+  function failBoot(text, hint) {
     state.mode = "error";
     state.qualityMode = "error";
     dom.startBtn.disabled = true;
     setBootStatus(text);
-    dom.areaName.textContent = "Scene failed";
+    dom.areaName.textContent = "Szene fehlgeschlagen";
     dom.landmarkName.textContent = text;
     dom.qualityMode.textContent = QUALITY.error;
-    dom.walkStatus.textContent = "error";
-    dom.hintText.textContent = "Pruefe WebGL oder lokale Dateien und lade die Seite neu.";
+    dom.walkStatus.textContent = "Fehler";
+    dom.hintText.textContent = hint || "Pruefe WebGL oder lokale Dateien und lade die Seite neu.";
   }
 
   function headingLabel(radians) {
@@ -1436,5 +2031,11 @@
 
   function toDeg(value) {
     return (value * 180) / Math.PI;
+  }
+
+  function approachValue(current, target, maxDelta) {
+    if (current < target) return Math.min(current + maxDelta, target);
+    if (current > target) return Math.max(current - maxDelta, target);
+    return current;
   }
 })();

@@ -18,7 +18,9 @@
   <body>
     <main class="app-shell" id="app-shell">
       <div class="backdrop-glow" aria-hidden="true"></div>
-      <div id="cesium-container" aria-label="Karlsruhe 3D Ansicht"></div>
+      <div class="photo-flash" id="photo-flash" aria-hidden="true"></div>
+      <div id="cesium-container" aria-label="Karlsruhe 3D Ansicht" tabindex="-1"></div>
+      <canvas id="weather-canvas" aria-hidden="true"></canvas>
 
       <div class="chrome-row top-row">
         <section class="panel location-panel" id="location-panel">
@@ -33,7 +35,7 @@
           <div class="stat-grid">
             <div class="stat-card">
               <span class="stat-label">Qualitaet</span>
-              <strong id="quality-mode">Boot</strong>
+              <strong id="quality-mode">Wird geladen</strong>
             </div>
             <div class="stat-card">
               <span class="stat-label">Blick</span>
@@ -49,14 +51,21 @@
             </div>
           </div>
           <button id="reset-btn" type="button">Zurueck zum Schlossplatz</button>
+          <button id="mute-btn" type="button" aria-pressed="false">Ton an</button>
         </section>
       </div>
 
       <section class="panel hint-panel" id="hint-panel">
         <span class="eyebrow">Steuerung</span>
         <p id="hint-text">
-          W A S D laufen, Pfeiltasten drehen oder vor/zurueck, Space sprinten, M Karte, E Landmarke, F Vollbild.
+          W A S D laufen, Pfeiltasten drehen oder vor/zurueck, Space sprinten, M Karte, E Landmarke, F Vollbild, L Ziele, P Foto.
         </p>
+      </section>
+
+      <section class="panel time-panel" id="time-panel">
+        <span class="eyebrow">Tageszeit</span>
+        <input type="range" id="time-slider" min="5" max="21" step="0.25" value="10.5" aria-label="Tageszeit einstellen">
+        <span id="time-label">10:30</span>
       </section>
 
       <section class="panel map-panel hidden" id="map-panel">
@@ -71,16 +80,21 @@
         </svg>
       </section>
 
-      <section class="panel inspect-panel hidden" id="inspect-panel">
+      <section class="panel inspect-panel hidden" id="inspect-panel" role="dialog" aria-modal="true" tabindex="-1" aria-labelledby="inspect-title">
         <span class="eyebrow">Landmarke</span>
         <h2 id="inspect-title">Karlsruhe</h2>
         <p id="inspect-body">Landmarken-Text wird geladen.</p>
       </section>
 
-      <section class="start-panel" id="start-panel">
+      <section class="panel travel-panel hidden" id="travel-panel" role="listbox" aria-label="Landmarken anspringen">
+        <span class="eyebrow">Ziel waehlen</span>
+        <ul id="travel-list"></ul>
+      </section>
+
+      <section class="start-panel" id="start-panel" role="dialog" aria-modal="true" tabindex="-1" aria-labelledby="start-heading">
         <div class="start-copy">
           <span class="eyebrow">Free-Roam Karlsruhe</span>
-          <h2>Frei im Browser durch den Karlsruher Innenstadtkern laufen</h2>
+          <h2 id="start-heading">Frei im Browser durch den Karlsruher Innenstadtkern laufen</h2>
           <p>
             Die App nutzt freie LGL-Orthophotos plus lokale 3D-Geometrie. Keine API-Keys,
             keine bezahlten Clouds, nur freie Open-Data-Layer und freie Bewegung.
@@ -108,9 +122,14 @@
         <button id="start-btn" type="button" disabled>Karlsruhe betreten</button>
       </section>
 
+      <div id="touch-move" class="touch-pad hidden" aria-hidden="true">
+        <div class="touch-pad-knob" id="touch-move-knob"></div>
+      </div>
+
       <div class="source-note" id="source-note">
         Freie Open-Data-Orthophotos plus lokale 3D-Geometrie. Keine API-Keys erforderlich.
       </div>
+      <div id="sr-status" class="sr-only" role="status" aria-live="polite"></div>
     </main>
   </body>
 </html>

@@ -3,8 +3,8 @@
 
   const QUALITY = {
     boot: "Wird geladen",
-    local: "Luftbild + OSM-Gebaeude",
-    localGround: "OSM-Gebaeude + lokaler Boden",
+    local: "Luftbild + OSM-Gebäude",
+    localGround: "OSM-Gebäude + lokaler Boden",
     error: "Szene-Fehler",
   };
 
@@ -155,17 +155,17 @@ void main()
     updateMuteButton();
 
     if (!isWebglAvailable()) {
-      failBoot("Kein WebGL verfuegbar.", "Dieser Browser oder dieses Geraet unterstuetzt kein WebGL. Aktiviere Hardwarebeschleunigung oder nutze einen aktuellen Desktop-Browser.");
+      failBoot("Kein WebGL verfügbar.", "Dieser Browser oder dieses Gerät unterstützt kein WebGL. Aktiviere Hardwarebeschleunigung oder nutze einen aktuellen Desktop-Browser.");
       return;
     }
 
     if (!window.Cesium) {
-      failBoot("Cesium konnte nicht geladen werden.", "Die 3D-Engine wurde nicht gefunden. Pruefe, ob der lokale Server laeuft (npm start) und lade die Seite neu.");
+      failBoot("Cesium konnte nicht geladen werden.", "Die 3D-Engine wurde nicht gefunden. Prüfe, ob der lokale Server läuft (npm start) und lade die Seite neu.");
       return;
     }
 
     try {
-      setBootStatus("Lade Karlsruher Datensaetze...");
+      setBootStatus("Lade Karlsruher Datensätze...");
       await loadWorld();
       buildMiniMap();
       buildTravelList();
@@ -185,8 +185,8 @@ void main()
       console.error(error);
       const message = shortError(error);
       const hint = /Failed to load/.test(message)
-        ? "Lokale Datendatei fehlt oder der Server liefert sie nicht aus. Pruefe public/data/ und starte den Server neu."
-        : "Pruefe WebGL oder lokale Dateien und lade die Seite neu.";
+        ? "Lokale Datendatei fehlt oder der Server liefert sie nicht aus. Prüfe public/data/ und starte den Server neu."
+        : "Prüfe WebGL oder lokale Dateien und lade die Seite neu.";
       failBoot(message, hint);
     }
   }
@@ -452,8 +452,8 @@ void main()
     state.qualityError = "";
     setBootStatus(
       state.useOrthophoto
-        ? "Lade freie LGL-Luftbilder und OSM-Gebaeude..."
-        : "Lade OSM-Gebaeude..."
+        ? "Lade freie LGL-Luftbilder und OSM-Gebäude..."
+        : "Lade OSM-Gebäude..."
     );
     if (!state.useOrthophoto) {
       addGroundPlane();
@@ -1309,7 +1309,7 @@ void main()
     state.mapOpen = typeof forceValue === "boolean" ? forceValue : !state.mapOpen;
     dom.mapPanel.classList.toggle("hidden", !state.mapOpen);
     updateHint();
-    announce(state.mapOpen ? "Karte geoeffnet." : "Karte geschlossen.");
+    announce(state.mapOpen ? "Karte geöffnet." : "Karte geschlossen.");
   }
 
   function toggleRain(forceValue) {
@@ -1384,7 +1384,7 @@ void main()
     }
 
     updateHint();
-    announce(state.inspectOpen ? `Landmarke geoeffnet: ${state.activeLandmark.name}.` : "Landmarke geschlossen.");
+    announce(state.inspectOpen ? `Landmarke geöffnet: ${state.activeLandmark.name}.` : "Landmarke geschlossen.");
   }
 
   function closeInspect() {
@@ -1679,7 +1679,7 @@ void main()
     state.activeLandmark = nearest;
     if (nearest && nearest.distance <= nearest.radius + 36) {
       if (nearest.id !== state.announcedLandmarkId) {
-        announce(`In der Naehe: ${nearest.name}. Taste E oeffnet Details.`);
+        announce(`In der Nähe: ${nearest.name}. Taste E öffnet Details.`);
         state.announcedLandmarkId = nearest.id;
       }
     } else {
@@ -1774,7 +1774,7 @@ void main()
       ? "Hindernis"
       : state.started
         ? state.player.speedMps > 0.05
-          ? "laeuft"
+          ? "läuft"
           : "steht"
         : "bereit";
 
@@ -1798,17 +1798,17 @@ void main()
     const hints = [];
 
     if (!state.started) {
-      hints.push("Klick auf Start oder druecke Enter.");
+      hints.push("Klick auf Start oder drücke Enter.");
     } else if (state.inspectOpen) {
-      hints.push("E oder Escape schliesst die Landmarke. Enter setzt den Startpunkt neu.");
+      hints.push("E oder Escape schließt die Landmarke. Enter setzt den Startpunkt neu.");
     } else if (state.travelMenuOpen) {
-      hints.push("Pfeil hoch runter waehlt, Enter springt zur Landmarke, L oder Escape schliesst.");
+      hints.push("Pfeil hoch runter wählt, Enter springt zur Landmarke, L oder Escape schließt.");
     } else {
-      hints.push(state.pointerLocked ? "Mausblick aktiv." : "Klicke in die Szene fuer Mausblick.");
-      hints.push("Pfeiltasten drehen oder laufen, W A S D fuer freie Schritte, Space sprintet.");
-      hints.push("L oeffnet die Ziel-Liste.");
+      hints.push(state.pointerLocked ? "Mausblick aktiv." : "Klicke in die Szene für Mausblick.");
+      hints.push("Pfeiltasten drehen oder laufen, W A S D für freie Schritte, Space sprintet.");
+      hints.push("L öffnet die Ziel-Liste.");
       if (state.activeLandmark && state.activeLandmark.distance <= state.activeLandmark.radius + 36) {
-        hints.push(`E oeffnet ${state.activeLandmark.name}.`);
+        hints.push(`E öffnet ${state.activeLandmark.name}.`);
       }
       if (state.moveBlocked) {
         hints.push("Hier geht es nicht weiter.");
@@ -2305,9 +2305,9 @@ void main()
     osmLink.rel = "noopener";
     osmLink.textContent = "© OpenStreetMap-Mitwirkende";
     dom.sourceNote.replaceChildren(
-      "Gebaeude, Baeume, Strassen: ",
+      "Gebäude, Bäume, Straßen: ",
       osmLink,
-      state.useOrthophoto ? " (ODbL). Luftbilder: LGL Baden-Wuerttemberg." : " (ODbL)."
+      state.useOrthophoto ? " (ODbL). Luftbilder: LGL Baden-Württemberg." : " (ODbL)."
     );
     if (state.qualityError) {
       dom.sourceNote.append(` ${state.qualityError}`);
@@ -2337,7 +2337,7 @@ void main()
     dom.landmarkName.textContent = text;
     dom.qualityMode.textContent = QUALITY.error;
     dom.walkStatus.textContent = "Fehler";
-    dom.hintText.textContent = hint || "Pruefe WebGL oder lokale Dateien und lade die Seite neu.";
+    dom.hintText.textContent = hint || "Prüfe WebGL oder lokale Dateien und lade die Seite neu.";
   }
 
   function headingLabel(radians) {

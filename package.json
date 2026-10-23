@@ -6,7 +6,8 @@
   "scripts": {
     "start": "node server.js",
     "build": "node scripts/build.mjs",
-    "preview": "node server.js --dist"
+    "preview": "node server.js --dist",
+    "fetch-osm": "node scripts/fetch-osm.mjs"
   },
   "engines": {
     "node": ">=18"

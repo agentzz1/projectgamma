@@ -149,6 +149,16 @@ button:disabled {
   align-items: flex-start;
 }
 
+.chrome-row .panel {
+  position: relative;
+}
+
+.app-shell:not(.hud-visible) .top-row,
+.app-shell:not(.hud-visible) .time-panel,
+.app-shell:not(.hud-visible) .hint-panel {
+  visibility: hidden;
+}
+
 .panel {
   border: 1px solid var(--line);
   background: var(--panel);
@@ -360,10 +370,9 @@ button:disabled {
   border: 1px solid rgba(255, 255, 255, 0.08);
 }
 
-#map-zones path {
-  fill: rgba(125, 196, 191, 0.18);
-  stroke: rgba(125, 196, 191, 0.7);
-  stroke-width: 1.7;
+#map-buildings path {
+  fill: rgba(222, 214, 196, 0.72);
+  stroke: none;
 }
 
 #map-landmarks circle {
@@ -394,6 +403,10 @@ button:disabled {
   background: rgba(9, 18, 24, 0.58);
   border: 1px solid rgba(255, 255, 255, 0.08);
   backdrop-filter: blur(10px);
+}
+
+.source-note a {
+  color: inherit;
 }
 
 .hidden {
@@ -472,6 +485,11 @@ button:disabled {
   .status-panel {
     min-width: 0;
     max-width: 100%;
+  }
+
+  .status-panel .stat-grid,
+  .status-panel .eyebrow {
+    display: none;
   }
 
   .hint-panel,

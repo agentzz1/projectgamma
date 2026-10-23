@@ -1,13 +1,28 @@
 # Karlsruhe Walk
 
-Desktop-first browser prototype for freely walking through a Karlsruhe-inspired inner city core.
+Desktop-first browser game for freely walking through the real inner city of Karlsruhe in first person.
 
 ## What it does
 
 - Uses CesiumJS in the browser from the local repo.
-- Runs free and local for development, with no external API keys or cloud accounts.
-- Uses a local OSM-derived block model and curated walk mesh.
-- Keeps movement on a curated walk mesh so the player stays on streets and plazas.
+- Renders the real buildings of the inner city (Schlossgarten to Ettlinger Tor, Europaplatz to Durlacher Tor) from OpenStreetMap: real footprints, heights, roof shapes (gabled, hipped, skillion, pyramidal, dome) and mapped facade and roof colours.
+- Places real trees, street lamps and benches at their mapped positions.
+- Uses the free LGL Baden-Württemberg DOP20 aerial imagery as ground. If that service is unreachable, it falls back to a local ground with parks, water and squares from OpenStreetMap.
+- Lets you walk anywhere outside buildings; the HUD shows the real street or square you are on.
+- Runs free, with no API keys or cloud accounts.
+
+## Data
+
+All city data lives in `public/data/osm-city.json` and is generated once from the OpenStreetMap API:
+
+```powershell
+npm run fetch-osm
+```
+
+`scripts/fetch-osm.mjs` downloads the area in small tiles (cached in your temp directory), assembles buildings, building parts and multipolygons, derives heights from `height` / `building:levels`, and writes the file in the game's local metre coordinates.
+Landmark texts, positions and travel viewpoints are curated in `public/data/landmarks.json`.
+
+Buildings, trees and streets: © OpenStreetMap contributors, [ODbL](https://www.openstreetmap.org/copyright). Aerial imagery: LGL Baden-Württemberg.
 
 ## Runtime config
 
@@ -28,11 +43,17 @@ Controls:
 - `W A S D`: move
 - `ArrowUp` / `ArrowDown`: forward / back
 - `ArrowLeft` / `ArrowRight`: turn
+- `Q` / `Z`: look up / down
 - `Space` or `Shift`: sprint
 - `M`: map
 - `E`: inspect nearby landmark
+- `L`: travel to a landmark
+- `R`: toggle rain
+- `P`: save a photo
 - `F`: fullscreen
 - `Enter`: start from overlay or reset to Schlossplatz
+
+Shadows are on in desktop browsers and switch off automatically if the frame rate stays below 24 fps.
 
 ## Build for static hosting
 

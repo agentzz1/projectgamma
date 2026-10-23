@@ -3,11 +3,65 @@
 
   const QUALITY = {
     boot: "Wird geladen",
-    local: "LGL orthophoto + local 3D",
+    local: "Luftbild + OSM-Gebaeude",
+    localGround: "OSM-Gebaeude + lokaler Boden",
     error: "Szene-Fehler",
   };
 
   const DEFAULT_POSE = { x: 0, y: -205, heading: Math.PI, pitch: -0.05 };
+  const PLAYER_RADIUS = 0.45;
+  const COLLISION_CELL = 24;
+  const RENDER_CELL = 220;
+  const WALL_PALETTE = ["#e8e1d3", "#e2d5bd", "#d9cab0", "#efe8dc", "#d5d0c6", "#e5d2c1", "#cdbfa8", "#e7dbc4", "#d3c5b7", "#c9c4ba"];
+  const CHURCH_PALETTE = ["#d6ccb8", "#c9b9a0", "#bfae96"];
+  const ROOF_PALETTE = ["#8e4c39", "#7b4233", "#9c5b43", "#5d6166", "#4f5358", "#6e5a4f"];
+  const TREE_PALETTE = ["#4d6b3c", "#5a7745", "#3f5d39", "#66804a", "#476540"];
+  // OSM colour names are coarse mapper hints ("yellow" for an ochre facade), not literal CSS colours.
+  const NAMED_WALL_COLORS = {
+    yellow: "#e2cf9c",
+    red: "#a85a47",
+    orange: "#d4a070",
+    brown: "#8c6c52",
+    green: "#86a083",
+    blue: "#8494a8",
+    white: "#ebe8e1",
+    grey: "#aeaca6",
+    gray: "#aeaca6",
+    black: "#4a4a4a",
+    silver: "#bcbfc1",
+    beige: "#ddd0b4",
+    cream: "#ece2c6",
+    pink: "#d9b6ab",
+    purple: "#8f7d94",
+  };
+  const NAMED_ROOF_COLORS = {
+    red: "#9a4b3a",
+    brown: "#6e4a3a",
+    green: "#6f9884",
+    grey: "#6d7074",
+    gray: "#6d7074",
+    black: "#3b3e41",
+    silver: "#9da2a6",
+    white: "#d8d8d4",
+    blue: "#5d6b7d",
+    orange: "#b06a45",
+  };
+  const SUNLIT_FRAGMENT_SHADER = `
+in vec3 v_positionEC;
+in vec3 v_normalEC;
+in vec4 v_color;
+
+void main()
+{
+    vec3 normalEC = normalize(v_normalEC);
+#ifdef FACE_FORWARD
+    normalEC = faceforward(normalEC, vec3(0.0, 0.0, 1.0), -normalEC);
+#endif
+    vec4 color = czm_gammaCorrect(v_color);
+    float sun = max(dot(normalEC, czm_lightDirectionEC), 0.0);
+    out_FragColor = vec4(color.rgb * (0.6 + 0.62 * sun * czm_lightColor), color.a);
+}
+`;
   const MOVEMENT_KEYS = new Set([
     "KeyW",
     "KeyA",
@@ -46,14 +100,15 @@
     announcedLandmarkId: null,
     announcedBlocked: false,
     currentArea: "Schlossplatz",
-    textureCache: {
-      building: new Map(),
-      ground: new Map(),
-    },
+    lastAreaPoint: null,
+    collision: null,
+    enuRotation: null,
     useOrthophoto: false,
     orthophotoFailed: false,
     frameHandle: 0,
     lastFrameTime: 0,
+    frameTimeAverage: 0,
+    slowSeconds: 0,
     fps: 0,
     fpsFrames: 0,
     fpsTimer: 0,
@@ -67,7 +122,7 @@
       y: DEFAULT_POSE.y,
       heading: DEFAULT_POSE.heading,
       pitch: DEFAULT_POSE.pitch,
-      groundHeight: 116.2,
+      groundHeight: 0,
       eyeHeight: 1.72,
       speedMps: 0,
       moveSpeed: 0,
@@ -124,7 +179,7 @@
       state.mode = "ready";
       dom.startBtn.disabled = false;
       dom.startBtn.focus();
-      setBootStatus(`Szene bereit: ${QUALITY[state.qualityMode]}`);
+      setBootStatus(`Szene bereit: ${qualityLabel()}`);
       startLoop();
     } catch (error) {
       console.error(error);
@@ -153,7 +208,7 @@
     dom.walkStatus = document.getElementById("walk-status");
     dom.hintText = document.getElementById("hint-text");
     dom.mapPanel = document.getElementById("map-panel");
-    dom.mapZones = document.getElementById("map-zones");
+    dom.mapBuildings = document.getElementById("map-buildings");
     dom.mapLandmarks = document.getElementById("map-landmarks");
     dom.mapPlayer = document.getElementById("map-player");
     dom.inspectPanel = document.getElementById("inspect-panel");
@@ -199,40 +254,92 @@
       return;
     }
 
-    const Cesium = window.Cesium;
     const hour = clamp(hourFloat, 0, 23.99);
     const wholeHour = Math.floor(hour);
     const minute = Math.round((hour - wholeHour) * 60);
-    const iso = `2026-06-21T${String(wholeHour).padStart(2, "0")}:${String(minute).padStart(2, "0")}:00Z`;
-    state.viewer.clock.currentTime = Cesium.JulianDate.fromIso8601(iso);
+    state.viewer.clock.currentTime = localTimeOfDay(hour);
     dom.timeLabel.textContent = `${String(wholeHour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
     renderScene();
   }
 
+  function localTimeOfDay(localHour) {
+    const summerTimeOffsetHours = 2;
+    const midnightUtc = Date.UTC(2026, 5, 21);
+    return window.Cesium.JulianDate.fromDate(new Date(midnightUtc + (localHour - summerTimeOffsetHours) * 3600000));
+  }
+
   async function loadWorld() {
-    const [zones, landmarks, buildings] = await Promise.all([
-      fetchJson("./data/walk-zones.json"),
+    const [city, landmarks] = await Promise.all([
+      fetchJson("./data/osm-city.json"),
       fetchJson("./data/landmarks.json"),
-      fetchJson("./data/fallback-buildings.json"),
     ]);
 
-    const origin = zones.origin;
+    const origin = city.origin;
     origin.metersPerLat = 111132;
     origin.metersPerLon = Math.cos((origin.lat * Math.PI) / 180) * 111320;
 
     state.world = {
       origin,
-      bounds: zones.bounds,
-      zones: zones.polygons,
+      bounds: city.bounds,
       landmarks,
-      buildings,
+      buildings: city.buildings.map(decodeBuilding),
+      streets: city.streets.map((street) => ({ name: street.n, points: toPoints(street.l) })),
+      areas: city.areas.map(decodeArea).sort((a, b) => a.size - b.size),
+      ground: city.ground.map((area) => ({ kind: area.k, outer: toPoints(area.a), holes: (area.h || []).map(toPoints) })),
+      trees: [],
+      lamps: [],
+      benches: [],
     };
 
-    state.player.groundHeight = estimateGroundHeight(DEFAULT_POSE.x, DEFAULT_POSE.y);
+    state.collision = buildCollisionIndex(state.world.buildings);
+    const outsideBuildings = (point) => !insideBuildingFootprint(point[0], point[1]);
+    state.world.trees = toPoints(city.trees).filter(outsideBuildings);
+    state.world.lamps = toPoints(city.lamps).filter(outsideBuildings);
+    state.world.benches = toPoints(city.benches).filter(outsideBuildings);
+    state.world.trees.forEach(([x, y]) => addCollisionCircle(x, y, 0.25));
+    state.world.lamps.forEach(([x, y]) => addCollisionCircle(x, y, 0.1));
+
+    state.player.groundHeight = estimateGroundHeight();
+  }
+
+  function decodeBuilding(record, index) {
+    const outer = toPoints(record.o);
+    return {
+      index,
+      outer,
+      holes: (record.h || []).map(toPoints),
+      bounds: polygonBounds(outer),
+      minHeight: record.mh,
+      wallHeight: record.wh,
+      totalHeight: record.th,
+      roofShape: record.rs || "flat",
+      roofAcross: record.ro === "across",
+      roofDirection: record.rd,
+      color: record.c,
+      roofColor: record.rc,
+      hasParts: Boolean(record.hp),
+      blocking: Boolean(record.b),
+      isChurch: record.k === "church",
+    };
+  }
+
+  function decodeArea(record) {
+    const points = toPoints(record.a);
+    const bounds = polygonBounds(points);
+    return { name: record.n, points, bounds, size: bounds.width * bounds.height };
+  }
+
+  function toPoints(flat) {
+    const points = [];
+    for (let index = 0; index + 1 < flat.length; index += 2) {
+      points.push([flat[index], flat[index + 1]]);
+    }
+    return points;
   }
 
   async function initViewer() {
     const Cesium = window.Cesium;
+    const lowPowerDevice = window.matchMedia("(pointer: coarse)").matches;
 
     state.viewer = new Cesium.Viewer("cesium-container", {
       useDefaultRenderLoop: false,
@@ -250,7 +357,7 @@
       shouldAnimate: false,
       baseLayer: false,
       terrainProvider: new Cesium.EllipsoidTerrainProvider(),
-      shadows: false,
+      shadows: !lowPowerDevice,
       contextOptions: {
         webgl: {
           alpha: false,
@@ -270,6 +377,7 @@
           format: "image/jpeg",
           transparent: false,
         },
+        maximumLevel: 19,
         enablePickFeatures: false,
       });
       let tileErrorCount = 0;
@@ -279,9 +387,12 @@
           state.orthophotoFailed = true;
           state.useOrthophoto = false;
           state.viewer.imageryLayers.removeAll();
-          addWalkSurfaces(0.88);
-          state.qualityError = "Freie Orthophotos nicht erreichbar, nutze lokales Bodenmodell.";
+          addGroundPlane();
+          state.qualityError = "Luftbilder vom LGL gerade nicht erreichbar, lokaler Boden aktiv.";
           updateSourceNote();
+          if (state.ready && !state.started) {
+            setBootStatus(`Szene bereit: ${qualityLabel()}`);
+          }
           console.warn("Orthophoto tiles failed repeatedly, switched to local ground texture.");
         }
       });
@@ -310,8 +421,7 @@
     if (state.viewer.scene.moon) {
       state.viewer.scene.moon.show = false;
     }
-    const fixedTime = Cesium.JulianDate.fromIso8601("2026-06-21T10:30:00Z");
-    state.viewer.clock.currentTime = fixedTime;
+    state.viewer.clock.currentTime = localTimeOfDay(Number(dom.timeSlider.value));
     state.viewer.clock.multiplier = 0;
     state.viewer.clock.shouldAnimate = false;
     state.viewer.scene.screenSpaceCameraController.enableInputs = false;
@@ -319,6 +429,19 @@
     state.viewer.scene.screenSpaceCameraController.minimumZoomDistance = 0;
     state.viewer.scene.screenSpaceCameraController.maximumZoomDistance = 0;
     state.viewer.camera.frustum.fov = Cesium.Math.toRadians(68);
+    state.viewer.camera.frustum.near = 0.1;
+    state.viewer.shadowMap.maximumDistance = 300;
+    state.viewer.shadowMap.softShadows = true;
+    state.viewer.shadowMap.darkness = 0.55;
+    state.viewer.shadowMap.size = 2048;
+    // Cesium's default primitive bias is tuned for small models and stripes large facades with shadow acne.
+    // Normal shading is off because SUNLIT_FRAGMENT_SHADER already darkens faces turned away from the sun.
+    const primitiveBias = state.viewer.shadowMap._primitiveBias;
+    if (primitiveBias) {
+      primitiveBias.normalOffsetScale = 0.6;
+      primitiveBias.depthBias = 0.0004;
+      primitiveBias.normalShading = false;
+    }
     state.viewer.resolutionScale = Math.min(window.devicePixelRatio || 1, 1.25);
 
     await configureQuality();
@@ -329,92 +452,538 @@
     state.qualityError = "";
     setBootStatus(
       state.useOrthophoto
-        ? "Nutze freie LGL-Orthophotos und lokale 3D-Geometrie..."
-        : "Nutze lokales Karlsruhe-Detailmodell..."
+        ? "Lade freie LGL-Luftbilder und OSM-Gebaeude..."
+        : "Lade OSM-Gebaeude..."
     );
     if (!state.useOrthophoto) {
-      addWalkSurfaces(0.88);
+      addGroundPlane();
     }
-    addFallbackBuildings();
+    addOsmBuildings();
     addStreetFurniture();
     addLandmarks(true);
     state.qualityMode = "local";
   }
 
-  function configureTileset(tileset) {
-    if ("maximumScreenSpaceError" in tileset) {
-      tileset.maximumScreenSpaceError = 10;
-    }
-    if ("dynamicScreenSpaceError" in tileset) {
-      tileset.dynamicScreenSpaceError = true;
-    }
-    if ("enableCollision" in tileset) {
-      tileset.enableCollision = true;
-    }
-  }
-
-  function addWalkSurfaces(alpha) {
+  function addGroundPlane() {
     const Cesium = window.Cesium;
-    const ground = state.world.origin.baseHeight;
+    const bounds = state.world.bounds;
+    const margin = 400;
+    const width = bounds.maxX - bounds.minX + margin * 2;
+    const depth = bounds.maxY - bounds.minY + margin * 2;
 
-    state.world.zones.forEach((zone) => {
-      const material = getGroundMaterial(zone, alpha);
-      state.viewer.entities.add({
-        polygon: {
-          hierarchy: polygonHierarchy(zone.points),
-          height: ground - 0.18,
-          extrudedHeight: ground + 0.05,
-          material,
-          outline: false,
-        },
-      });
+    state.viewer.entities.add({
+      polygon: {
+        hierarchy: polygonHierarchy([
+          [bounds.minX - margin, bounds.minY - margin],
+          [bounds.maxX + margin, bounds.minY - margin],
+          [bounds.maxX + margin, bounds.maxY + margin],
+          [bounds.minX - margin, bounds.maxY + margin],
+        ]),
+        height: state.world.origin.baseHeight + 0.03,
+        material: new Cesium.ImageMaterialProperty({
+          image: createGroundTexture(),
+          repeat: new Cesium.Cartesian2(Math.round(width / 12), Math.round(depth / 12)),
+        }),
+        shadows: Cesium.ShadowMode.RECEIVE_ONLY,
+      },
     });
+
+    const styles = {
+      paved: { color: "#a19b90", height: 0.05 },
+      green: { color: "#6b8553", height: 0.09 },
+      water: { color: "#56768a", height: 0.12 },
+    };
+    const toPositions = (ring) => ring.map((point) => localToCartesian(point[0], point[1], 0));
+    addBatchedPrimitive(
+      state.world.ground.map((area) => {
+        const style = styles[area.kind];
+        return new Cesium.GeometryInstance({
+          geometry: new Cesium.PolygonGeometry({
+            polygonHierarchy: new Cesium.PolygonHierarchy(
+              toPositions(area.outer),
+              area.holes.map((hole) => new Cesium.PolygonHierarchy(toPositions(hole)))
+            ),
+            height: state.world.origin.baseHeight + style.height,
+            vertexFormat: Cesium.PerInstanceColorAppearance.VERTEX_FORMAT,
+          }),
+          attributes: { color: Cesium.ColorGeometryInstanceAttribute.fromColor(Cesium.Color.fromCssColorString(style.color)) },
+        });
+      }),
+      { closed: false, shadows: Cesium.ShadowMode.RECEIVE_ONLY }
+    );
   }
 
-  function addFallbackBuildings() {
+  function addOsmBuildings() {
     const Cesium = window.Cesium;
-    const base = state.world.origin.baseHeight;
+    const cells = new Map();
 
     state.world.buildings.forEach((building) => {
-      const material = getBuildingMaterial(building);
-      const roofColor = Cesium.Color.fromCssColorString(building.color || "#9b8c77").withAlpha(0.96);
-      const roofHeight = base + building.height + 0.04;
-      const wallPositions = building.footprint
-        .concat([building.footprint[0]])
-        .map((point) => localToCartesian(point[0], point[1], base));
-      const minimumHeights = wallPositions.map(() => base);
-      const maximumHeights = wallPositions.map(() => base + building.height);
+      if (building.hasParts) {
+        return;
+      }
 
-      state.viewer.entities.add({
-        wall: {
-          positions: wallPositions,
-          minimumHeights,
-          maximumHeights,
-          material,
-        },
-      });
+      const wallColor = buildingWallColor(building);
+      const roof = buildRoofMesh(building);
+      const wallTop = roof ? building.wallHeight : (building.wallHeight + building.totalHeight) / 2;
+      const centerX = (building.bounds.minX + building.bounds.maxX) / 2;
+      const centerY = (building.bounds.minY + building.bounds.maxY) / 2;
 
-      state.viewer.entities.add({
-        polygon: {
-          hierarchy: polygonHierarchy(building.footprint),
-          height: roofHeight,
-          material: roofColor,
-          outline: true,
-          outlineColor: Cesium.Color.fromCssColorString("#232826").withAlpha(0.28),
-        },
+      pushToCell(
+        cells,
+        centerX,
+        centerY,
+        "walls",
+        new Cesium.GeometryInstance({
+          geometry: new Cesium.PolygonGeometry({
+            polygonHierarchy: buildingHierarchy(building),
+            height: building.minHeight,
+            extrudedHeight: wallTop,
+            vertexFormat: Cesium.PerInstanceColorAppearance.VERTEX_FORMAT,
+          }),
+          attributes: { color: Cesium.ColorGeometryInstanceAttribute.fromColor(wallColor) },
+        })
+      );
+
+      if (roof) {
+        pushToCell(cells, centerX, centerY, "roofs", meshInstance(roof.roof, buildingRoofColor(building)));
+        if (roof.gable.positions.length) {
+          pushToCell(cells, centerX, centerY, "roofs", meshInstance(roof.gable, wallColor));
+        }
+      }
+    });
+
+    cells.forEach((cell) => {
+      addBatchedPrimitive(cell.walls || [], { shadows: Cesium.ShadowMode.ENABLED });
+      addBatchedPrimitive(cell.roofs || [], { closed: false, asynchronous: false, shadows: Cesium.ShadowMode.ENABLED });
+    });
+  }
+
+  // Spatial cells let Cesium frustum-cull whole blocks of the city; one malformed OSM polygon also only loses its cell.
+  function pushToCell(cells, x, y, group, instance) {
+    const key = `${Math.floor(x / RENDER_CELL)}:${Math.floor(y / RENDER_CELL)}`;
+    let cell = cells.get(key);
+    if (!cell) {
+      cell = {};
+      cells.set(key, cell);
+    }
+    if (!cell[group]) {
+      cell[group] = [];
+    }
+    cell[group].push(instance);
+  }
+
+  function buildingHierarchy(building) {
+    const Cesium = window.Cesium;
+    const toPositions = (ring) => ring.map((point) => localToCartesian(point[0], point[1], 0));
+    return new Cesium.PolygonHierarchy(
+      toPositions(building.outer),
+      building.holes.map((hole) => new Cesium.PolygonHierarchy(toPositions(hole)))
+    );
+  }
+
+  function buildingWallColor(building) {
+    const variation = (hashString(`wall:${building.index}`) % 1000) / 1000;
+    const palette = building.isChurch ? CHURCH_PALETTE : WALL_PALETTE;
+    const fallback = palette[hashString(`palette:${building.index}`) % palette.length];
+    return taggedColor(building.color, NAMED_WALL_COLORS, fallback, variation);
+  }
+
+  function buildingRoofColor(building) {
+    const variation = (hashString(`roof:${building.index}`) % 1000) / 1000;
+    const fallback = ROOF_PALETTE[hashString(`roofpalette:${building.index}`) % ROOF_PALETTE.length];
+    return taggedColor(building.roofColor, NAMED_ROOF_COLORS, fallback, variation);
+  }
+
+  function taggedColor(value, namedColors, fallback, variation) {
+    const Cesium = window.Cesium;
+    if (value && namedColors[value]) {
+      return softenColor(Cesium.Color.fromCssColorString(namedColors[value]), 0, variation);
+    }
+    const parsed = value && Cesium.Color.fromCssColorString(value);
+    if (parsed) {
+      return softenColor(parsed, 0.5, variation);
+    }
+    return softenColor(Cesium.Color.fromCssColorString(fallback), 0, variation);
+  }
+
+  function softenColor(color, mute, variation) {
+    const luminance = color.red * 0.299 + color.green * 0.587 + color.blue * 0.114;
+    const scale = 0.93 + variation * 0.08;
+    const channel = (value) => Math.min(0.92, (value + (luminance - value) * mute) * scale);
+    return new window.Cesium.Color(channel(color.red), channel(color.green), channel(color.blue), 1);
+  }
+
+  function buildRoofMesh(building) {
+    const shape = building.roofShape;
+    const base = building.wallHeight;
+    const top = building.totalHeight;
+    if (shape === "flat" || top - base < 0.3) {
+      return null;
+    }
+    if (shape === "pyramidal" || shape === "dome") {
+      return pyramidRoof(building.outer, base, top, shape === "dome");
+    }
+    const rect = roofRectangle(building.outer);
+    if (!rect) {
+      return null;
+    }
+    return shape === "skillion"
+      ? skillionRoof(rect, base, top, building.roofDirection)
+      : ridgeRoof(rect, base, top, shape === "hipped", building.roofAcross);
+  }
+
+  function ridgeRoof(rect, base, top, hipped, across) {
+    let [a, b, c, d] = rect;
+    const abIsLong = distance2d(a, b) >= distance2d(b, c);
+    if (abIsLong === across) {
+      [a, b, c, d] = [b, c, d, a];
+    }
+
+    const center = polygonCentroid(rect);
+    let ridgeStart = midpoint(d, a);
+    let ridgeEnd = midpoint(b, c);
+    if (hipped) {
+      const ridgeLength = distance2d(ridgeStart, ridgeEnd);
+      const inset = Math.min(distance2d(a, d) / 2, ridgeLength * 0.45);
+      const t = ridgeLength > 0 ? inset / ridgeLength : 0;
+      const start = ridgeStart;
+      ridgeStart = lerpPoint(start, ridgeEnd, t);
+      ridgeEnd = lerpPoint(ridgeEnd, start, t);
+    }
+
+    const corner = (point) => [point[0], point[1], base];
+    const ridge = (point) => [point[0], point[1], top];
+    const roof = newMesh();
+    const gable = newMesh();
+    addQuad(roof, corner(a), corner(b), ridge(ridgeEnd), ridge(ridgeStart), "up", center);
+    addQuad(roof, corner(c), corner(d), ridge(ridgeStart), ridge(ridgeEnd), "up", center);
+    addTriangle(hipped ? roof : gable, corner(d), corner(a), ridge(ridgeStart), hipped ? "up" : "out", center);
+    addTriangle(hipped ? roof : gable, corner(b), corner(c), ridge(ridgeEnd), hipped ? "up" : "out", center);
+    return { roof, gable };
+  }
+
+  function pyramidRoof(outer, base, top, dome) {
+    const center = polygonCentroid(outer);
+    const profile = dome ? [[1, 0], [0.9, 0.42], [0.66, 0.75], [0.36, 0.94]] : [[1, 0]];
+    const rings = profile.map(([radius, rise]) =>
+      outer.map((point) => [
+        center[0] + (point[0] - center[0]) * radius,
+        center[1] + (point[1] - center[1]) * radius,
+        base + (top - base) * rise,
+      ])
+    );
+    const apex = [center[0], center[1], top];
+    const roof = newMesh();
+
+    rings.forEach((ring, level) => {
+      const next = rings[level + 1];
+      ring.forEach((point, index) => {
+        const following = (index + 1) % ring.length;
+        if (next) {
+          addQuad(roof, point, ring[following], next[following], next[index], "up", center);
+        } else {
+          addTriangle(roof, point, ring[following], apex, "up", center);
+        }
       });
     });
+    return { roof, gable: newMesh() };
+  }
+
+  function skillionRoof(rect, base, top, direction) {
+    let downhill;
+    if (Number.isFinite(direction)) {
+      const azimuth = (direction * Math.PI) / 180;
+      downhill = [Math.sin(azimuth), Math.cos(azimuth)];
+    } else {
+      const longIsAB = distance2d(rect[0], rect[1]) >= distance2d(rect[1], rect[2]);
+      const [p, q] = longIsAB ? [rect[0], rect[1]] : [rect[1], rect[2]];
+      const length = distance2d(p, q) || 1;
+      downhill = [-(q[1] - p[1]) / length, (q[0] - p[0]) / length];
+    }
+
+    const projections = rect.map((point) => point[0] * downhill[0] + point[1] * downhill[1]);
+    const lowest = Math.min(...projections);
+    const span = Math.max(...projections) - lowest || 1;
+    const corners = rect.map((point, index) => [
+      point[0],
+      point[1],
+      top - ((top - base) * (projections[index] - lowest)) / span,
+    ]);
+    const center = polygonCentroid(rect);
+    const roof = newMesh();
+    const gable = newMesh();
+
+    addQuad(roof, corners[0], corners[1], corners[2], corners[3], "up", center);
+    rect.forEach((point, index) => {
+      const following = (index + 1) % rect.length;
+      addQuad(
+        gable,
+        [point[0], point[1], base],
+        [rect[following][0], rect[following][1], base],
+        corners[following],
+        corners[index],
+        "out",
+        center
+      );
+    });
+    return { roof, gable };
+  }
+
+  function roofRectangle(outer) {
+    if (outer.length === 4 && isConvex(outer)) {
+      return outer;
+    }
+    const box = minimumAreaRectangle(outer);
+    return box && Math.abs(polygonArea(outer)) / box.area > 0.82 ? box.corners : null;
+  }
+
+  function minimumAreaRectangle(points) {
+    let best = null;
+    points.forEach((a, index) => {
+      const b = points[(index + 1) % points.length];
+      const length = distance2d(a, b);
+      if (length < 0.5) {
+        return;
+      }
+      const ux = (b[0] - a[0]) / length;
+      const uy = (b[1] - a[1]) / length;
+      let minU = Infinity;
+      let maxU = -Infinity;
+      let minV = Infinity;
+      let maxV = -Infinity;
+      points.forEach(([x, y]) => {
+        const u = x * ux + y * uy;
+        const v = -x * uy + y * ux;
+        minU = Math.min(minU, u);
+        maxU = Math.max(maxU, u);
+        minV = Math.min(minV, v);
+        maxV = Math.max(maxV, v);
+      });
+      const area = (maxU - minU) * (maxV - minV);
+      if (!best || area < best.area) {
+        best = { area, ux, uy, minU, maxU, minV, maxV };
+      }
+    });
+    if (!best || best.area <= 0) {
+      return null;
+    }
+    const corner = (u, v) => [u * best.ux - v * best.uy, u * best.uy + v * best.ux];
+    return {
+      area: best.area,
+      corners: [
+        corner(best.minU, best.minV),
+        corner(best.maxU, best.minV),
+        corner(best.maxU, best.maxV),
+        corner(best.minU, best.maxV),
+      ],
+    };
+  }
+
+  function newMesh() {
+    return { positions: [], normals: [] };
+  }
+
+  function addQuad(mesh, a, b, c, d, facing, center) {
+    addTriangle(mesh, a, b, c, facing, center);
+    addTriangle(mesh, a, c, d, facing, center);
+  }
+
+  function addTriangle(mesh, a, b, c, facing, center) {
+    const ux = b[0] - a[0];
+    const uy = b[1] - a[1];
+    const uz = b[2] - a[2];
+    const vx = c[0] - a[0];
+    const vy = c[1] - a[1];
+    const vz = c[2] - a[2];
+    let nx = uy * vz - uz * vy;
+    let ny = uz * vx - ux * vz;
+    let nz = ux * vy - uy * vx;
+    const length = Math.hypot(nx, ny, nz);
+    if (length < 1e-6) {
+      return;
+    }
+    nx /= length;
+    ny /= length;
+    nz /= length;
+
+    const outward = facing === "up"
+      ? nz
+      : nx * ((a[0] + b[0] + c[0]) / 3 - center[0]) + ny * ((a[1] + b[1] + c[1]) / 3 - center[1]);
+    let second = b;
+    let third = c;
+    if (outward < 0) {
+      nx = -nx;
+      ny = -ny;
+      nz = -nz;
+      second = c;
+      third = b;
+    }
+
+    const normal = localNormalToFixed(nx, ny, nz);
+    [a, second, third].forEach((vertex) => {
+      const position = localToCartesian(vertex[0], vertex[1], vertex[2]);
+      mesh.positions.push(position.x, position.y, position.z);
+      mesh.normals.push(normal.x, normal.y, normal.z);
+    });
+  }
+
+  function localNormalToFixed(x, y, z) {
+    const Cesium = window.Cesium;
+    if (!state.enuRotation) {
+      const frame = Cesium.Transforms.eastNorthUpToFixedFrame(localToCartesian(0, 0, 0));
+      state.enuRotation = Cesium.Matrix4.getMatrix3(frame, new Cesium.Matrix3());
+    }
+    return Cesium.Matrix3.multiplyByVector(state.enuRotation, new Cesium.Cartesian3(x, y, z), new Cesium.Cartesian3());
+  }
+
+  function meshInstance(mesh, color) {
+    const Cesium = window.Cesium;
+    const positions = new Float64Array(mesh.positions);
+    const vertexCount = positions.length / 3;
+    const indices = vertexCount < 65536 ? new Uint16Array(vertexCount) : new Uint32Array(vertexCount);
+    indices.forEach((_, index) => {
+      indices[index] = index;
+    });
+
+    return new Cesium.GeometryInstance({
+      geometry: new Cesium.Geometry({
+        attributes: {
+          position: new Cesium.GeometryAttribute({
+            componentDatatype: Cesium.ComponentDatatype.DOUBLE,
+            componentsPerAttribute: 3,
+            values: positions,
+          }),
+          normal: new Cesium.GeometryAttribute({
+            componentDatatype: Cesium.ComponentDatatype.FLOAT,
+            componentsPerAttribute: 3,
+            values: new Float32Array(mesh.normals),
+          }),
+        },
+        indices,
+        primitiveType: Cesium.PrimitiveType.TRIANGLES,
+        boundingSphere: Cesium.BoundingSphere.fromVertices(positions),
+      }),
+      attributes: { color: Cesium.ColorGeometryInstanceAttribute.fromColor(color) },
+    });
+  }
+
+  function addBatchedPrimitive(instances, options) {
+    if (!instances.length) {
+      return;
+    }
+    const Cesium = window.Cesium;
+    const settings = { closed: true, asynchronous: true, shadows: Cesium.ShadowMode.DISABLED, ...options };
+    state.viewer.scene.primitives.add(
+      new Cesium.Primitive({
+        geometryInstances: instances,
+        appearance: new Cesium.PerInstanceColorAppearance({
+          translucent: false,
+          closed: settings.closed,
+          fragmentShaderSource: SUNLIT_FRAGMENT_SHADER,
+        }),
+        asynchronous: settings.asynchronous,
+        allowPicking: false,
+        shadows: settings.shadows,
+      })
+    );
+  }
+
+  function addStreetFurniture() {
+    const Cesium = window.Cesium;
+    const format = Cesium.PerInstanceColorAppearance.VERTEX_FORMAT;
+    const crownGeometry = new Cesium.EllipsoidGeometry({
+      radii: new Cesium.Cartesian3(1, 1, 1),
+      stackPartitions: 5,
+      slicePartitions: 7,
+      vertexFormat: format,
+    });
+    const cylinderGeometry = new Cesium.CylinderGeometry({ length: 1, topRadius: 0.5, bottomRadius: 0.5, slices: 6, vertexFormat: format });
+    const boxGeometry = Cesium.BoxGeometry.fromDimensions({ dimensions: new Cesium.Cartesian3(1, 1, 1), vertexFormat: format });
+    const ground = estimateGroundHeight();
+    const treeRange = 650;
+    const detailRange = 220;
+    const cells = new Map();
+
+    const trunkColor = Cesium.Color.fromCssColorString("#5f4630");
+    state.world.trees.forEach(([x, y], index) => {
+      const rng = mulberry32(hashString(`tree:${index}`));
+      const height = 7 + rng() * 7;
+      const radius = 2.2 + rng() * 2.1;
+      const crownDepth = Math.min(radius * (1.05 + rng() * 0.35), height * 0.4);
+      const trunkLength = Math.max(1.6, height - crownDepth * 1.4);
+      const crownColor = Cesium.Color.fromCssColorString(TREE_PALETTE[Math.floor(rng() * TREE_PALETTE.length)]);
+      const crownFrame = scaledFrame(x, y, ground + height - crownDepth, radius, radius, crownDepth);
+      const trunkFrame = scaledFrame(x, y, ground + trunkLength / 2, 0.34, 0.34, trunkLength);
+      pushToCell(cells, x, y, "crowns", colorInstance(crownGeometry, crownFrame, crownColor, treeRange));
+      pushToCell(cells, x, y, "posts", colorInstance(cylinderGeometry, trunkFrame, trunkColor, treeRange));
+    });
+
+    const poleColor = Cesium.Color.fromCssColorString("#4f5961");
+    const lampColor = Cesium.Color.fromCssColorString("#ffe3a6");
+    state.world.lamps.forEach(([x, y], index) => {
+      const height = 5 + (index % 3) * 0.5;
+      pushToCell(cells, x, y, "posts", colorInstance(cylinderGeometry, scaledFrame(x, y, ground + height / 2, 0.16, 0.16, height), poleColor, detailRange));
+      pushToCell(cells, x, y, "details", colorInstance(boxGeometry, scaledFrame(x, y, ground + height + 0.15, 0.45, 0.45, 0.3), lampColor, detailRange));
+    });
+
+    const woodColor = Cesium.Color.fromCssColorString("#6b4a30");
+    const metalColor = Cesium.Color.fromCssColorString("#3a4044");
+    state.world.benches.forEach(([x, y]) => {
+      const street = nearestStreetPoint(x, y);
+      const heading = street ? Math.atan2(street.b[0] - street.a[0], street.b[1] - street.a[1]) : 0;
+      const away = street && street.distance > 0.01
+        ? [(x - street.x) / street.distance, (y - street.y) / street.distance]
+        : [Math.cos(heading), -Math.sin(heading)];
+      const seat = rotatedFrame(x, y, ground + 0.45, heading, 0.45, 1.7, 0.06);
+      const back = rotatedFrame(x + away[0] * 0.22, y + away[1] * 0.22, ground + 0.72, heading, 0.06, 1.7, 0.5);
+      pushToCell(cells, x, y, "details", colorInstance(boxGeometry, seat, woodColor, detailRange));
+      pushToCell(cells, x, y, "details", colorInstance(boxGeometry, back, metalColor, detailRange));
+    });
+
+    cells.forEach((cell) => {
+      addBatchedPrimitive(cell.crowns || [], { shadows: Cesium.ShadowMode.ENABLED });
+      addBatchedPrimitive(cell.posts || [], { shadows: Cesium.ShadowMode.CAST_ONLY });
+      addBatchedPrimitive(cell.details || [], {});
+    });
+  }
+
+  function colorInstance(geometry, modelMatrix, color, maxDistance) {
+    const Cesium = window.Cesium;
+    return new Cesium.GeometryInstance({
+      geometry,
+      modelMatrix,
+      attributes: {
+        color: Cesium.ColorGeometryInstanceAttribute.fromColor(color),
+        distanceDisplayCondition: new Cesium.DistanceDisplayConditionGeometryInstanceAttribute(0, maxDistance),
+      },
+    });
+  }
+
+  function scaledFrame(x, y, z, sx, sy, sz) {
+    const Cesium = window.Cesium;
+    const frame = Cesium.Transforms.eastNorthUpToFixedFrame(localToCartesian(x, y, z));
+    return Cesium.Matrix4.multiplyByScale(frame, new Cesium.Cartesian3(sx, sy, sz), new Cesium.Matrix4());
+  }
+
+  function rotatedFrame(x, y, z, heading, sx, sy, sz) {
+    const Cesium = window.Cesium;
+    const frame = Cesium.Transforms.headingPitchRollToFixedFrame(
+      localToCartesian(x, y, z),
+      new Cesium.HeadingPitchRoll(heading, 0, 0)
+    );
+    return Cesium.Matrix4.multiplyByScale(frame, new Cesium.Cartesian3(sx, sy, sz), new Cesium.Matrix4());
   }
 
   function addLandmarks(forceVisible) {
     const Cesium = window.Cesium;
+    const nearbyOnly = new Cesium.DistanceDisplayCondition(0, 320);
 
     state.landmarkEntities = state.world.landmarks.map((landmark) =>
       state.viewer.entities.add({
         position: localToCartesian(
           landmark.x,
           landmark.y,
-          estimateGroundHeight(landmark.x, landmark.y) + 3.6
+          estimateGroundHeight() + 3.6
         ),
         point: {
           pixelSize: forceVisible ? 9 : 7,
@@ -422,6 +991,7 @@
           outlineColor: Cesium.Color.WHITE,
           outlineWidth: 2,
           disableDepthTestDistance: Number.POSITIVE_INFINITY,
+          distanceDisplayCondition: nearbyOnly,
           show: true,
         },
         label: {
@@ -437,159 +1007,11 @@
           disableDepthTestDistance: Number.POSITIVE_INFINITY,
           showBackground: true,
           backgroundColor: Cesium.Color.fromCssColorString("#0d151a").withAlpha(0.78),
+          distanceDisplayCondition: nearbyOnly,
           show: true,
         },
       })
     );
-  }
-
-  function addStreetFurniture() {
-    const lamps = [
-      [-124, 132], [-42, 138], [42, 138], [124, 132],
-      [-76, -238], [0, -246], [76, -238],
-      [-122, -356], [-40, -364], [40, -364], [122, -356],
-      [-125, -540], [-52, -538], [52, -538], [125, -540],
-      [-346, -552], [-292, -548], [-236, -548], [-178, -552],
-      [178, -552], [236, -548], [292, -548], [346, -552],
-      [-252, -700], [-188, -708], [-124, -700],
-      [-88, -776], [0, -780], [88, -776],
-      [-72, -862], [0, -872], [72, -862],
-    ];
-
-    const trees = [
-      [-136, 155], [136, 155], [-138, 72], [138, 72],
-      [-248, -688], [-208, -732], [-110, -736], [-62, -682],
-      [116, -688], [152, -744], [248, -748], [286, -686],
-    ];
-
-    lamps.forEach((point, index) => {
-      addLampPost(point[0], point[1], index);
-    });
-
-    trees.forEach((point, index) => {
-      addStreetTree(point[0], point[1], index);
-    });
-
-    const benches = [
-      [-90, 150, 0], [90, 150, Math.PI],
-      [-140, -40, Math.PI / 2], [140, -40, -Math.PI / 2],
-      [-60, -520, 0], [60, -520, Math.PI],
-    ];
-    const bikeRacks = [
-      [-100, -495, 0], [100, -495, 0],
-      [-380, -560, Math.PI / 2], [380, -560, -Math.PI / 2],
-    ];
-
-    benches.forEach((p, i) => addBench(p[0], p[1], p[2], i));
-    bikeRacks.forEach((p, i) => addBikeRack(p[0], p[1], p[2], i));
-  }
-
-  function addBench(x, y, heading, index) {
-    const Cesium = window.Cesium;
-    const ground = estimateGroundHeight(x, y);
-    const orientation = Cesium.Transforms.headingPitchRollQuaternion(
-      localToCartesian(x, y, ground),
-      new Cesium.HeadingPitchRoll(heading, 0, 0)
-    );
-    const woodColor = Cesium.Color.fromCssColorString(index % 2 === 0 ? "#6b4a30" : "#5a3d28").withAlpha(0.97);
-
-    state.viewer.entities.add({
-      position: localToCartesian(x, y, ground + 0.46),
-      orientation,
-      box: {
-        // dimensions.y is the long (1.7m) seat axis: at heading 0 the box-local Y axis
-        // aligns with the heading vector (compass north), so the seat runs along heading.
-        dimensions: new Cesium.Cartesian3(0.46, 1.7, 0.06),
-        material: woodColor,
-      },
-    });
-
-    state.viewer.entities.add({
-      position: localToCartesian(x, y, ground + 0.72),
-      orientation,
-      box: {
-        dimensions: new Cesium.Cartesian3(0.06, 1.7, 0.5),
-        material: Cesium.Color.fromCssColorString("#33383a").withAlpha(0.97),
-      },
-    });
-  }
-
-  function addBikeRack(x, y, heading, index) {
-    const Cesium = window.Cesium;
-    const ground = estimateGroundHeight(x, y);
-    const dir = { x: Math.cos(heading), y: -Math.sin(heading) };
-    const metalColor = Cesium.Color.fromCssColorString("#7a8085").withAlpha(0.97);
-
-    for (let i = 0; i < 4; i += 1) {
-      const offset = (i - 1.5) * 0.55;
-      const px = x + dir.x * offset;
-      const py = y + dir.y * offset;
-      const orientation = Cesium.Transforms.headingPitchRollQuaternion(
-        localToCartesian(px, py, ground),
-        new Cesium.HeadingPitchRoll(heading, 0, 0)
-      );
-
-      state.viewer.entities.add({
-        position: localToCartesian(px, py, ground + 0.45),
-        orientation,
-        box: {
-          dimensions: new Cesium.Cartesian3(0.04, 0.5, 0.9),
-          material: metalColor,
-        },
-      });
-    }
-  }
-
-  function addLampPost(x, y, index) {
-    const Cesium = window.Cesium;
-    const ground = estimateGroundHeight(x, y);
-    const warm = Cesium.Color.fromCssColorString(index % 4 === 0 ? "#ffe9b2" : "#ffd27d");
-    const poleColor = Cesium.Color.fromCssColorString("#4f5961").withAlpha(0.98);
-
-    state.viewer.entities.add({
-      position: localToCartesian(x, y, ground + 2.8),
-      cylinder: {
-        length: 5.4,
-        topRadius: 0.045,
-        bottomRadius: 0.085,
-        material: poleColor,
-        slices: 8,
-      },
-    });
-
-    state.viewer.entities.add({
-      position: localToCartesian(x + 0.2, y, ground + 5.45),
-      ellipsoid: {
-        radii: new Cesium.Cartesian3(0.16, 0.16, 0.12),
-        material: warm.withAlpha(0.94),
-        outline: false,
-      },
-    });
-  }
-
-  function addStreetTree(x, y, index) {
-    const Cesium = window.Cesium;
-    const ground = estimateGroundHeight(x, y);
-    const palette = index % 3 === 0 ? "#4e6a42" : index % 3 === 1 ? "#5a7449" : "#3f5b3f";
-
-    state.viewer.entities.add({
-      position: localToCartesian(x, y, ground + 0.72),
-      cylinder: {
-        length: 1.4,
-        topRadius: 0.14,
-        bottomRadius: 0.22,
-        material: Cesium.Color.fromCssColorString("#6a4d31").withAlpha(0.98),
-      },
-    });
-
-    state.viewer.entities.add({
-      position: localToCartesian(x, y, ground + 3.45),
-      ellipsoid: {
-        radii: new Cesium.Cartesian3(1.7, 1.7, 2.5),
-        material: Cesium.Color.fromCssColorString(palette).withAlpha(0.94),
-        outline: false,
-      },
-    });
   }
 
   function attachInput() {
@@ -797,6 +1219,7 @@
     state.started = true;
     state.mode = "explore";
     dom.startPanel.classList.add("hidden");
+    dom.appShell.classList.add("hud-visible");
     dom.cesiumContainer.focus();
     updateHint();
   }
@@ -1002,24 +1425,34 @@
     if (!landmark) {
       return;
     }
-    state.player.x = landmark.x;
-    state.player.y = landmark.y;
-    state.player.groundHeight = estimateGroundHeight(landmark.x, landmark.y);
+    const [targetX, targetY] = landmark.view || [landmark.x, landmark.y];
+    const spot = findWalkableNear(targetX, targetY);
+    if (!spot) {
+      return;
+    }
+    state.player.x = spot.x;
+    state.player.y = spot.y;
+    if (Math.hypot(landmark.x - spot.x, landmark.y - spot.y) > 1) {
+      state.player.heading = normalizeAngle(Math.atan2(landmark.x - spot.x, landmark.y - spot.y));
+    }
+    state.player.groundHeight = estimateGroundHeight();
     state.player.speedMps = 0;
+    state.player.moveSpeed = 0;
     updateWorldState();
     updateCamera();
     toggleTravelMenu(false);
   }
 
   function resetPlayerPose() {
-    state.player.x = DEFAULT_POSE.x;
-    state.player.y = DEFAULT_POSE.y;
+    const spawn = findWalkableNear(DEFAULT_POSE.x, DEFAULT_POSE.y) || DEFAULT_POSE;
+    state.player.x = spawn.x;
+    state.player.y = spawn.y;
     state.player.heading = DEFAULT_POSE.heading;
     state.player.pitch = DEFAULT_POSE.pitch;
     state.player.speedMps = 0;
     state.player.moveSpeed = 0;
     state.player.bobPhase = 0;
-    state.player.groundHeight = estimateGroundHeight(DEFAULT_POSE.x, DEFAULT_POSE.y);
+    state.player.groundHeight = estimateGroundHeight();
     state.mapOpen = false;
     state.inspectOpen = false;
     state.moveBlocked = false;
@@ -1039,15 +1472,16 @@
     const headingDeg = Number(match[3]);
     const pitchDeg = Number(match[4]);
     if (![x, y, headingDeg, pitchDeg].every(Number.isFinite)) return;
-    if (!insideWalkMesh(x, y)) {
-      console.warn("Shared position outside walk mesh, ignoring URL hash.");
+    const spot = findWalkableNear(x, y);
+    if (!spot) {
+      console.warn("Shared position is outside the walkable area, ignoring URL hash.");
       return;
     }
-    state.player.x = x;
-    state.player.y = y;
+    state.player.x = spot.x;
+    state.player.y = spot.y;
     state.player.heading = normalizeAngle((headingDeg * Math.PI) / 180);
     state.player.pitch = clamp((pitchDeg * Math.PI) / 180, -1.08, 0.48);
-    state.player.groundHeight = estimateGroundHeight(x, y);
+    state.player.groundHeight = estimateGroundHeight();
     updateWorldState();
     updateCamera();
   }
@@ -1057,14 +1491,27 @@
     state.lastFrameTime = performance.now();
 
     const frame = (timestamp) => {
-      const delta = Math.min(0.05, (timestamp - state.lastFrameTime) / 1000 || 0.016);
+      const realDelta = (timestamp - state.lastFrameTime) / 1000 || 0.016;
       state.lastFrameTime = timestamp;
-      step(delta);
+      adaptShadowQuality(realDelta);
+      step(Math.min(0.05, realDelta));
       renderScene();
       state.frameHandle = requestAnimationFrame(frame);
     };
 
     state.frameHandle = requestAnimationFrame(frame);
+  }
+
+  function adaptShadowQuality(realDelta) {
+    if (!state.started || !state.viewer.shadows) {
+      return;
+    }
+    state.frameTimeAverage = state.frameTimeAverage ? state.frameTimeAverage * 0.95 + realDelta * 0.05 : realDelta;
+    state.slowSeconds = state.frameTimeAverage > 1 / 24 ? state.slowSeconds + realDelta : 0;
+    if (state.slowSeconds > 4) {
+      state.viewer.shadows = false;
+      console.info("Frame rate below 24 fps, shadows switched off.");
+    }
   }
 
   function step(deltaSeconds) {
@@ -1109,8 +1556,8 @@
       traveled = Math.hypot(resolved.x - state.player.x, resolved.y - state.player.y);
       state.player.x = resolved.x;
       state.player.y = resolved.y;
-      state.moveBlocked = resolved.blocked;
-      if (resolved.blocked) {
+      state.moveBlocked = resolved.blocked && traveled < 1e-3;
+      if (state.moveBlocked) {
         state.player.moveSpeed = 0;
       }
     } else {
@@ -1118,7 +1565,7 @@
     }
 
     if (state.moveBlocked && !state.announcedBlocked) {
-      announce("Rand des begehbaren Bereichs erreicht.");
+      announce("Hier geht es nicht weiter.");
     }
     state.announcedBlocked = state.moveBlocked;
 
@@ -1171,7 +1618,7 @@
   }
 
   function resolveWalkMove(fromX, fromY, toX, toY) {
-    if (insideWalkMesh(toX, toY)) {
+    if (isWalkable(toX, toY)) {
       return { x: toX, y: toY, blocked: false };
     }
     let lo = 0;
@@ -1180,7 +1627,7 @@
       const mid = (lo + hi) / 2;
       const mx = fromX + (toX - fromX) * mid;
       const my = fromY + (toY - fromY) * mid;
-      if (insideWalkMesh(mx, my)) {
+      if (isWalkable(mx, my)) {
         lo = mid;
       } else {
         hi = mid;
@@ -1189,11 +1636,23 @@
     const clippedX = fromX + (toX - fromX) * lo;
     const clippedY = fromY + (toY - fromY) * lo;
 
-    if (insideWalkMesh(toX, clippedY)) {
+    if (isWalkable(toX, clippedY)) {
       return { x: toX, y: clippedY, blocked: true };
     }
-    if (insideWalkMesh(clippedX, toY)) {
+    if (isWalkable(clippedX, toY)) {
       return { x: clippedX, y: toY, blocked: true };
+    }
+    // Facades are rarely axis-aligned, so also try sliding at an angle to the wall.
+    const dx = toX - fromX;
+    const dy = toY - fromY;
+    for (const angle of [0.6, -0.6, 1.1, -1.1]) {
+      const cos = Math.cos(angle);
+      const sin = Math.sin(angle);
+      const slideX = fromX + (dx * cos - dy * sin) * cos;
+      const slideY = fromY + (dx * sin + dy * cos) * cos;
+      if (isWalkable(slideX, slideY)) {
+        return { x: slideX, y: slideY, blocked: true };
+      }
     }
     if (lo > 0) {
       return { x: clippedX, y: clippedY, blocked: true };
@@ -1202,7 +1661,7 @@
   }
 
   function updateGroundHeight() {
-    state.player.groundHeight = estimateGroundHeight(state.player.x, state.player.y);
+    state.player.groundHeight = estimateGroundHeight();
   }
 
   function updateWorldState() {
@@ -1226,8 +1685,42 @@
     } else {
       state.announcedLandmarkId = null;
     }
-    const zone = state.world.zones.find((candidate) => pointInPolygon(state.player.x, state.player.y, candidate.points));
-    state.currentArea = zone ? zone.label : nearest ? nearest.areaName : "Innenstadt Kern";
+    const last = state.lastAreaPoint;
+    if (!last || Math.hypot(state.player.x - last.x, state.player.y - last.y) > 2) {
+      state.currentArea = areaNameAt(state.player.x, state.player.y);
+      state.lastAreaPoint = { x: state.player.x, y: state.player.y };
+    }
+  }
+
+  function areaNameAt(x, y) {
+    const area = state.world.areas.find(
+      (candidate) =>
+        x >= candidate.bounds.minX &&
+        x <= candidate.bounds.maxX &&
+        y >= candidate.bounds.minY &&
+        y <= candidate.bounds.maxY &&
+        pointInPolygon(x, y, candidate.points)
+    );
+    if (area) {
+      return area.name;
+    }
+    const street = nearestStreetPoint(x, y);
+    return street && street.distance < 28 ? street.name : "Karlsruher Innenstadt";
+  }
+
+  function nearestStreetPoint(x, y) {
+    let best = null;
+    state.world.streets.forEach((street) => {
+      for (let index = 1; index < street.points.length; index += 1) {
+        const a = street.points[index - 1];
+        const b = street.points[index];
+        const closest = closestPointOnSegment(x, y, a, b);
+        if (!best || closest.distance < best.distance) {
+          best = { ...closest, a, b, name: street.name };
+        }
+      }
+    });
+    return best;
   }
 
   function updateCamera() {
@@ -1273,12 +1766,12 @@
     dom.landmarkDistance.textContent = state.activeLandmark
       ? `${formatMeters(state.activeLandmark.distance)} entfernt`
       : "0 m";
-    dom.qualityMode.textContent = QUALITY[state.qualityMode] || state.qualityMode;
+    dom.qualityMode.textContent = qualityLabel();
     dom.headingText.textContent = `${headingLabel(state.player.heading)} · ${Math.round(toDeg(state.player.heading))}deg`;
     dom.speedText.textContent = `${state.player.speedMps.toFixed(1)} m/s`;
     dom.headingText.textContent = `${headingLabel(state.player.heading)} | ${Math.round(toDeg(state.player.heading))}deg`;
     dom.walkStatus.textContent = state.moveBlocked
-      ? "Rand"
+      ? "Hindernis"
       : state.started
         ? state.player.speedMps > 0.05
           ? "laeuft"
@@ -1292,6 +1785,13 @@
 
     updateHint();
     updateMiniMap();
+  }
+
+  function qualityLabel() {
+    if (state.qualityMode === "local" && !state.useOrthophoto) {
+      return QUALITY.localGround;
+    }
+    return QUALITY[state.qualityMode] || state.qualityMode;
   }
 
   function updateHint() {
@@ -1311,7 +1811,7 @@
         hints.push(`E oeffnet ${state.activeLandmark.name}.`);
       }
       if (state.moveBlocked) {
-        hints.push("Walk-Mesh-Rand erreicht.");
+        hints.push("Hier geht es nicht weiter.");
       }
       hints.push("R schaltet Regen ein/aus.");
       hints.push("P speichert ein Foto.");
@@ -1331,15 +1831,19 @@
   }
 
   function buildMiniMap() {
-    dom.mapZones.textContent = "";
+    dom.mapBuildings.textContent = "";
     dom.mapLandmarks.textContent = "";
     dom.mapPlayer.textContent = "";
 
-    state.world.zones.forEach((zone) => {
-      const path = document.createElementNS(svgNs, "path");
-      path.setAttribute("d", svgPath(zone.points));
-      dom.mapZones.appendChild(path);
-    });
+    const footprints = document.createElementNS(svgNs, "path");
+    footprints.setAttribute(
+      "d",
+      state.world.buildings
+        .filter((building) => building.blocking)
+        .map((building) => svgPath(building.outer))
+        .join(" ")
+    );
+    dom.mapBuildings.appendChild(footprints);
 
     state.world.landmarks.forEach((landmark) => {
       const group = document.createElementNS(svgNs, "g");
@@ -1380,20 +1884,23 @@
     return points
       .map((point, index) => {
         const projected = mapPoint(point[0], point[1]);
-        return `${index === 0 ? "M" : "L"} ${projected.x.toFixed(2)} ${projected.y.toFixed(2)}`;
+        return `${index === 0 ? "M" : "L"}${projected.x.toFixed(1)} ${projected.y.toFixed(1)}`;
       })
       .concat("Z")
-      .join(" ");
+      .join("");
   }
 
   function mapPoint(x, y) {
-    const pad = 16;
-    const width = 280 - pad * 2;
-    const height = 280 - pad * 2;
-    const nx = (x - state.world.bounds.minX) / (state.world.bounds.maxX - state.world.bounds.minX || 1);
-    const ny = 1 - (y - state.world.bounds.minY) / (state.world.bounds.maxY - state.world.bounds.minY || 1);
+    const bounds = state.world.bounds;
+    const pad = 12;
+    const size = 280 - pad * 2;
+    const spanX = bounds.maxX - bounds.minX || 1;
+    const spanY = bounds.maxY - bounds.minY || 1;
+    const scale = size / Math.max(spanX, spanY);
+    const offsetX = pad + (size - spanX * scale) / 2;
+    const offsetY = pad + (size - spanY * scale) / 2;
 
-    return { x: pad + nx * width, y: pad + ny * height };
+    return { x: offsetX + (x - bounds.minX) * scale, y: offsetY + (bounds.maxY - y) * scale };
   }
 
   function localToDegrees(x, y, height) {
@@ -1420,10 +1927,6 @@
     );
   }
 
-  function insideWalkMesh(x, y) {
-    return state.world.zones.some((zone) => pointInPolygon(x, y, zone.points));
-  }
-
   function pointInPolygon(x, y, points) {
     let inside = false;
     for (let i = 0, j = points.length - 1; i < points.length; j = i++) {
@@ -1441,134 +1944,188 @@
     return inside;
   }
 
-  function estimateGroundHeight(x, y) {
-    const south = Math.max(0, -y);
-    const side = Math.abs(x);
-    return state.world.origin.baseHeight - south * 0.00145 - side * 0.00018;
+  function buildCollisionIndex(buildings) {
+    const index = { cells: new Map() };
+    buildings.forEach((building) => {
+      if (building.blocking) {
+        registerCollisionEntry(index, building.bounds, building);
+      }
+    });
+    return index;
   }
 
-  function zoneColor(id) {
-    if (id.includes("schloss")) return "#8a9b6e";
-    if (id.includes("kaiser")) return "#6b7a8c";
-    if (id.includes("marktplatz")) return "#a8875f";
-    if (id.includes("ettlinger")) return "#7d6f8a";
-    return "#5c8a7a";
+  function addCollisionCircle(x, y, radius) {
+    registerCollisionEntry(
+      state.collision,
+      { minX: x - radius, minY: y - radius, maxX: x + radius, maxY: y + radius },
+      { x, y, radius }
+    );
   }
 
-  function getGroundMaterial(zone, alpha) {
-    const Cesium = window.Cesium;
-    const cacheKey = `${zone.id}:${alpha.toFixed(2)}`;
+  function registerCollisionEntry(index, bounds, entry) {
+    const minCellX = Math.floor((bounds.minX - PLAYER_RADIUS) / COLLISION_CELL);
+    const maxCellX = Math.floor((bounds.maxX + PLAYER_RADIUS) / COLLISION_CELL);
+    const minCellY = Math.floor((bounds.minY - PLAYER_RADIUS) / COLLISION_CELL);
+    const maxCellY = Math.floor((bounds.maxY + PLAYER_RADIUS) / COLLISION_CELL);
+    for (let cellX = minCellX; cellX <= maxCellX; cellX += 1) {
+      for (let cellY = minCellY; cellY <= maxCellY; cellY += 1) {
+        const key = collisionKey(cellX, cellY);
+        const list = index.cells.get(key);
+        if (list) {
+          list.push(entry);
+        } else {
+          index.cells.set(key, [entry]);
+        }
+      }
+    }
+  }
 
-    if (!state.textureCache.ground.has(cacheKey)) {
-      const texture = createGroundTexture(zone, alpha);
-      const bounds = polygonBounds(zone.points);
-      const repeat = textureRepeat(bounds.width, bounds.height, 28, 28);
-      state.textureCache.ground.set(
-        cacheKey,
-        new Cesium.ImageMaterialProperty({
-          image: texture,
-          repeat: new Cesium.Cartesian2(repeat.x, repeat.y),
-        })
+  function collisionKey(cellX, cellY) {
+    return (cellX + 4096) * 8192 + (cellY + 4096);
+  }
+
+  function collisionEntriesAt(x, y) {
+    return state.collision.cells.get(collisionKey(Math.floor(x / COLLISION_CELL), Math.floor(y / COLLISION_CELL))) || [];
+  }
+
+  function isWalkable(x, y) {
+    const bounds = state.world.bounds;
+    if (x < bounds.minX || x > bounds.maxX || y < bounds.minY || y > bounds.maxY) {
+      return false;
+    }
+    return collisionEntriesAt(x, y).every((entry) => {
+      if (entry.radius !== undefined) {
+        return Math.hypot(x - entry.x, y - entry.y) >= entry.radius + PLAYER_RADIUS;
+      }
+      const b = entry.bounds;
+      if (x < b.minX - PLAYER_RADIUS || x > b.maxX + PLAYER_RADIUS || y < b.minY - PLAYER_RADIUS || y > b.maxY + PLAYER_RADIUS) {
+        return true;
+      }
+      return (
+        !insideFootprint(x, y, entry) &&
+        ringDistance(x, y, entry.outer) >= PLAYER_RADIUS &&
+        entry.holes.every((hole) => ringDistance(x, y, hole) >= PLAYER_RADIUS)
       );
-    }
-
-    return state.textureCache.ground.get(cacheKey);
-  }
-
-  function getBuildingMaterial(building) {
-    const Cesium = window.Cesium;
-    const theme = buildingTheme(building.id, building.height);
-    const textureKey = `${theme}:${building.color || "#9b8c77"}`;
-
-    if (!state.textureCache.building.has(textureKey)) {
-      state.textureCache.building.set(textureKey, createBuildingTexture(building));
-    }
-    const texture = state.textureCache.building.get(textureKey);
-
-    const bounds = polygonBounds(building.footprint);
-    const repeat = textureRepeat(bounds.width, bounds.height, 42, 16);
-    const heightRepeat = clamp(Math.round(building.height / 9), 1, 6);
-
-    return new Cesium.ImageMaterialProperty({
-      image: texture,
-      repeat: new Cesium.Cartesian2(repeat.x, Math.max(repeat.y, heightRepeat)),
     });
   }
 
-  function createGroundTexture(zone, alpha) {
-    const canvas = document.createElement("canvas");
-    canvas.width = 512;
-    canvas.height = 512;
-    const ctx = canvas.getContext("2d");
-
-    if (!ctx) {
-      return canvas;
-    }
-
-    const rng = mulberry32(hashString(`ground:${zone.id}`));
-    const base = hexToRgb(zoneColor(zone.id));
-    const style = groundStyle(zone.id);
-    const light = tintColor(base, 0.22);
-    const dark = tintColor(base, -0.2);
-
-    if (state.useOrthophoto) {
-      ctx.globalAlpha = clamp(alpha, 0.08, 0.18);
-    } else {
-      ctx.globalAlpha = clamp(alpha, 0.72, 1);
-    }
-    const gradient = ctx.createLinearGradient(0, 0, canvas.width, canvas.height);
-    gradient.addColorStop(0, rgbToCss(light));
-    gradient.addColorStop(0.5, rgbToCss(base));
-    gradient.addColorStop(1, rgbToCss(dark));
-    ctx.fillStyle = gradient;
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-    ctx.globalAlpha = 1;
-
-    if (state.useOrthophoto) {
-      const tint = style === "road" ? "#1b2429" : style === "plaza" ? "#4f5e5a" : "#44554a";
-      drawNoise(ctx, canvas, rng, 0.02, tint);
-    } else {
-      if (style === "plaza") {
-        drawPaverTexture(ctx, canvas, rng, base);
-      } else if (style === "road") {
-        drawAsphaltTexture(ctx, canvas, rng, base);
-      } else {
-        drawGrassTexture(ctx, canvas, rng, base);
-      }
-      drawNoise(ctx, canvas, rng, style === "road" ? 0.08 : 0.06, style === "road" ? "#0e1315" : "#ffffff");
-    }
-
-    return canvas;
+  function insideBuildingFootprint(x, y) {
+    return collisionEntriesAt(x, y).some((entry) => entry.outer && insideFootprint(x, y, entry));
   }
 
-  function createBuildingTexture(building) {
+  function insideFootprint(x, y, building) {
+    return pointInPolygon(x, y, building.outer) && !building.holes.some((hole) => pointInPolygon(x, y, hole));
+  }
+
+  function ringDistance(x, y, ring) {
+    let best = Number.POSITIVE_INFINITY;
+    for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+      best = Math.min(best, closestPointOnSegment(x, y, ring[j], ring[i]).distance);
+    }
+    return best;
+  }
+
+  function findWalkableNear(x, y) {
+    if (isWalkable(x, y)) {
+      return { x, y };
+    }
+    for (let radius = 1.5; radius <= 150; radius += 1.5) {
+      const steps = Math.max(12, Math.round(radius * 2));
+      for (let step = 0; step < steps; step += 1) {
+        const angle = (step / steps) * Math.PI * 2;
+        const px = x + Math.cos(angle) * radius;
+        const py = y + Math.sin(angle) * radius;
+        if (isWalkable(px, py)) {
+          return { x: px, y: py };
+        }
+      }
+    }
+    return null;
+  }
+
+  function closestPointOnSegment(x, y, a, b) {
+    const dx = b[0] - a[0];
+    const dy = b[1] - a[1];
+    const lengthSquared = dx * dx + dy * dy;
+    const t = lengthSquared > 0 ? clamp(((x - a[0]) * dx + (y - a[1]) * dy) / lengthSquared, 0, 1) : 0;
+    const px = a[0] + dx * t;
+    const py = a[1] + dy * t;
+    return { x: px, y: py, distance: Math.hypot(x - px, y - py) };
+  }
+
+  function isConvex(points) {
+    let sign = 0;
+    for (let index = 0; index < points.length; index += 1) {
+      const a = points[index];
+      const b = points[(index + 1) % points.length];
+      const c = points[(index + 2) % points.length];
+      const cross = (b[0] - a[0]) * (c[1] - b[1]) - (b[1] - a[1]) * (c[0] - b[0]);
+      if (Math.abs(cross) < 1e-9) {
+        continue;
+      }
+      if (sign === 0) {
+        sign = Math.sign(cross);
+      } else if (Math.sign(cross) !== sign) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  function polygonArea(points) {
+    let area = 0;
+    for (let i = 0, j = points.length - 1; i < points.length; j = i++) {
+      area += points[j][0] * points[i][1] - points[i][0] * points[j][1];
+    }
+    return area / 2;
+  }
+
+  function polygonCentroid(points) {
+    const area = polygonArea(points);
+    if (Math.abs(area) < 1e-6) {
+      const sum = points.reduce((total, point) => [total[0] + point[0], total[1] + point[1]], [0, 0]);
+      return [sum[0] / points.length, sum[1] / points.length];
+    }
+    let cx = 0;
+    let cy = 0;
+    for (let i = 0, j = points.length - 1; i < points.length; j = i++) {
+      const factor = points[j][0] * points[i][1] - points[i][0] * points[j][1];
+      cx += (points[j][0] + points[i][0]) * factor;
+      cy += (points[j][1] + points[i][1]) * factor;
+    }
+    return [cx / (6 * area), cy / (6 * area)];
+  }
+
+  function distance2d(a, b) {
+    return Math.hypot(b[0] - a[0], b[1] - a[1]);
+  }
+
+  function midpoint(a, b) {
+    return [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
+  }
+
+  function lerpPoint(a, b, t) {
+    return [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
+  }
+
+  function estimateGroundHeight() {
+    return state.world.origin.baseHeight;
+  }
+
+  function createGroundTexture() {
     const canvas = document.createElement("canvas");
     canvas.width = 512;
     canvas.height = 512;
     const ctx = canvas.getContext("2d");
-
     if (!ctx) {
       return canvas;
     }
 
-    const theme = buildingTheme(building.id, building.height);
-    const rng = mulberry32(hashString(`building:${theme}:${building.color || "#9b8c77"}`));
-    const base = hexToRgb(building.color || "#9b8c77");
-    const top = tintColor(base, theme === "palace" ? 0.22 : theme === "stone" ? 0.18 : 0.14);
-    const mid = tintColor(base, theme === "palace" ? 0.06 : 0.02);
-    const bottom = tintColor(base, -0.18);
-
-    const gradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
-    gradient.addColorStop(0, rgbToCss(top));
-    gradient.addColorStop(0.52, rgbToCss(mid));
-    gradient.addColorStop(1, rgbToCss(bottom));
-    ctx.fillStyle = gradient;
+    const rng = mulberry32(hashString("ground"));
+    const base = hexToRgb("#6c6a65");
+    ctx.fillStyle = rgbToCss(base);
     ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-    drawVerticalBands(ctx, canvas, rng, theme);
-    drawFacadeBands(ctx, canvas, rng, theme);
-    drawFacadeWindows(ctx, canvas, rng, theme);
-    drawBuildingShadows(ctx, canvas, rng, theme);
+    drawPaverTexture(ctx, canvas, rng, base);
     drawNoise(ctx, canvas, rng, 0.06, "#ffffff");
     return canvas;
   }
@@ -1593,193 +2150,6 @@
     ctx.fillRect(0, canvas.height * 0.73, canvas.width, 2);
   }
 
-  function drawAsphaltTexture(ctx, canvas, rng, base) {
-    ctx.fillStyle = rgbToCss(tintColor(base, 0.03), 0.96);
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-    for (let i = 0; i < 6200; i += 1) {
-      const x = Math.floor(rng() * canvas.width);
-      const y = Math.floor(rng() * canvas.height);
-      const alpha = rng() * 0.1;
-      const tone = rng() * 16 - 8;
-      ctx.fillStyle = `rgba(${110 + tone}, ${116 + tone}, ${112 + tone}, ${alpha})`;
-      ctx.fillRect(x, y, 1 + Math.floor(rng() * 2), 1 + Math.floor(rng() * 2));
-    }
-
-    ctx.strokeStyle = "rgba(255,255,255,0.08)";
-    ctx.lineWidth = 2;
-    for (let y = 0; y < canvas.height; y += 96) {
-      ctx.beginPath();
-      ctx.moveTo(0, y + 0.5);
-      ctx.lineTo(canvas.width, y + 0.5);
-      ctx.stroke();
-    }
-
-    ctx.fillStyle = "rgba(244, 224, 166, 0.16)";
-    ctx.fillRect(canvas.width * 0.48, 0, 6, canvas.height);
-    ctx.fillStyle = "rgba(255, 255, 255, 0.08)";
-    ctx.fillRect(canvas.width * 0.07, canvas.height * 0.18, canvas.width * 0.86, 3);
-    ctx.fillRect(canvas.width * 0.07, canvas.height * 0.82, canvas.width * 0.86, 3);
-  }
-
-  function drawGrassTexture(ctx, canvas, rng, base) {
-    ctx.fillStyle = rgbToCss(tintColor(base, 0.05), 0.94);
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-    for (let i = 0; i < 3600; i += 1) {
-      const x = Math.floor(rng() * canvas.width);
-      const y = Math.floor(rng() * canvas.height);
-      const tone = rng() * 18 - 9;
-      ctx.fillStyle = `rgba(${88 + tone}, ${112 + tone}, ${78 + tone}, ${rng() * 0.12})`;
-      ctx.fillRect(x, y, 1, 1);
-    }
-  }
-
-  function drawVerticalBands(ctx, canvas, rng, theme) {
-    const bandWidth = theme === "palace" ? 84 : theme === "tower" ? 116 : 148;
-    const bandCount = Math.max(4, Math.floor(canvas.width / bandWidth));
-    for (let index = 0; index < bandCount; index += 1) {
-      const x = Math.floor((index / bandCount) * canvas.width);
-      const alpha = theme === "palace" ? 0.1 : theme === "tower" ? 0.035 : theme === "stone" ? 0.028 : 0.018;
-      ctx.fillStyle = `rgba(255,255,255,${alpha})`;
-      ctx.fillRect(x, 0, theme === "palace" ? 9 : theme === "tower" ? 5 : 3, canvas.height);
-      ctx.fillStyle = `rgba(0,0,0,${alpha * 1.2})`;
-      ctx.fillRect(x + (theme === "tower" ? 9 : 11), 0, theme === "tower" ? 2 : 1, canvas.height);
-    }
-
-    if (theme === "palace") {
-      ctx.fillStyle = "rgba(255,255,255,0.12)";
-      ctx.fillRect(0, 18, canvas.width, 16);
-      ctx.fillStyle = "rgba(68,52,30,0.22)";
-      ctx.fillRect(0, canvas.height - 20, canvas.width, 20);
-    } else if (theme === "block" || theme === "stone" || theme === "tower") {
-      ctx.fillStyle = "rgba(255,255,255,0.02)";
-      ctx.fillRect(0, 14, canvas.width, theme === "tower" ? 8 : 5);
-      ctx.fillStyle = "rgba(27,34,36,0.04)";
-      ctx.fillRect(0, canvas.height - (theme === "tower" ? 30 : 24), canvas.width, theme === "tower" ? 30 : 24);
-    }
-  }
-
-  function drawFacadeBands(ctx, canvas, rng, theme) {
-    const roofBand = theme === "palace" ? 18 : theme === "tower" ? 14 : 12;
-    const plinthBand = theme === "palace" ? 24 : 18;
-    const shopBand = theme === "block" ? 76 : 56;
-
-    ctx.fillStyle = "rgba(255,255,255,0.14)";
-    ctx.fillRect(0, 0, canvas.width, roofBand);
-    ctx.fillStyle = "rgba(36, 28, 20, 0.2)";
-    ctx.fillRect(0, canvas.height - plinthBand, canvas.width, plinthBand);
-
-    if (theme !== "palace") {
-      ctx.fillStyle = "rgba(48, 42, 34, 0.16)";
-      ctx.fillRect(0, canvas.height - shopBand, canvas.width, 12);
-      ctx.fillStyle = "rgba(255, 248, 224, 0.06)";
-      for (let x = 28; x < canvas.width - 20; x += 68 + Math.floor(rng() * 18)) {
-        ctx.fillRect(x, canvas.height - shopBand + 14, 28, 34);
-      }
-    } else {
-      ctx.fillStyle = "rgba(255, 240, 200, 0.16)";
-      ctx.fillRect(0, 28, canvas.width, 10);
-    }
-  }
-
-  function drawFacadeWindows(ctx, canvas, rng, theme) {
-    const shopBandTop = canvas.height * (theme === "block" ? 0.82 : 0.86);
-    const columns = theme === "palace" ? 6 : theme === "tower" ? 6 : 8;
-    const rows = theme === "palace" ? 8 : theme === "tower" ? 10 : 10;
-    const paddingX = theme === "palace" ? 36 : 26;
-    const paddingY = theme === "palace" ? 30 : 22;
-    const spacingX = (canvas.width - paddingX * 2) / columns;
-    const spacingY = (shopBandTop - paddingY * 2) / rows;
-
-    for (let row = 0; row < rows; row += 1) {
-      for (let col = 0; col < columns; col += 1) {
-        const width = theme === "palace" ? 34 : 24 + Math.floor(rng() * 8);
-        const height = theme === "palace" ? 56 : 30 + Math.floor(rng() * 14);
-        const x = paddingX + col * spacingX + spacingX * 0.2;
-        const y = paddingY + row * spacingY + spacingY * 0.16;
-        const lit = rng() > (theme === "palace" ? 0.5 : 0.62);
-        const frame = lit ? "rgba(247,236,204,0.86)" : "rgba(24,28,30,0.82)";
-        const glass = lit ? "rgba(223, 206, 149, 0.52)" : "rgba(66, 74, 76, 0.56)";
-
-        ctx.fillStyle = frame;
-        ctx.fillRect(x, y, width, height);
-        ctx.fillStyle = glass;
-        ctx.fillRect(x + 3, y + 4, width - 6, height - 8);
-
-        ctx.fillStyle = frame;
-        ctx.fillRect(x + width / 2 - 1, y + 2, 2, height - 4);
-        if (theme !== "tower") ctx.fillRect(x + 3, y + height / 2 - 1, width - 6, 2);
-
-        if (theme !== "palace" && rng() > 0.45) {
-          ctx.fillStyle = "rgba(255,255,255,0.035)";
-          ctx.fillRect(x + width * 0.45, y + 2, width * 0.12, height - 4);
-        }
-      }
-    }
-
-    if (theme !== "palace") {
-      const shopCount = theme === "block" ? 3 : 2;
-      const shopGap = 12;
-      const shopSpacing = (canvas.width - paddingX * 2) / shopCount;
-      const shopTop = shopBandTop + 6;
-      const shopHeight = canvas.height - shopTop - 20;
-
-      for (let i = 0; i < shopCount; i += 1) {
-        const x = paddingX + i * shopSpacing + shopGap / 2;
-        const width = shopSpacing - shopGap;
-        const lit = rng() > 0.3;
-        const frame = lit ? "rgba(247,236,204,0.9)" : "rgba(24,28,30,0.86)";
-        const glass = lit ? "rgba(223, 206, 149, 0.58)" : "rgba(66, 74, 76, 0.6)";
-
-        ctx.fillStyle = frame;
-        ctx.fillRect(x, shopTop, width, shopHeight);
-        ctx.fillStyle = glass;
-        ctx.fillRect(x + 4, shopTop + 4, width - 8, shopHeight - 8);
-
-        ctx.fillStyle = frame;
-        ctx.fillRect(x + width / 2 - 1, shopTop + 3, 2, shopHeight - 6);
-      }
-    }
-
-    if (theme === "palace") {
-      ctx.fillStyle = "rgba(246, 228, 178, 0.2)";
-      ctx.fillRect(30, 0, canvas.width - 60, 10);
-    } else {
-      ctx.fillStyle = "rgba(31, 39, 42, 0.08)";
-      ctx.fillRect(0, canvas.height * 0.58, canvas.width, 12);
-    }
-  }
-
-  function drawBuildingShadows(ctx, canvas, rng, theme) {
-    const edge = ctx.createLinearGradient(0, 0, canvas.width, 0);
-    edge.addColorStop(0, "rgba(0,0,0,0.16)");
-    edge.addColorStop(0.16, "rgba(0,0,0,0.04)");
-    edge.addColorStop(0.72, "rgba(0,0,0,0.04)");
-    edge.addColorStop(1, "rgba(0,0,0,0.22)");
-    ctx.fillStyle = edge;
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-    const vertical = ctx.createLinearGradient(0, 0, 0, canvas.height);
-    vertical.addColorStop(0, "rgba(255,255,255,0.1)");
-    vertical.addColorStop(0.42, "rgba(255,255,255,0.03)");
-    vertical.addColorStop(1, "rgba(0,0,0,0.16)");
-    ctx.fillStyle = vertical;
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-    const sunShadow = ctx.createLinearGradient(0, 0, canvas.width * 0.3, canvas.height);
-    sunShadow.addColorStop(0, "rgba(0,0,0,0.03)");
-    sunShadow.addColorStop(1, "rgba(0,0,0,0.12)");
-    ctx.fillStyle = sunShadow;
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-    if (theme === "tower") {
-      ctx.fillStyle = "rgba(0,0,0,0.1)";
-      ctx.fillRect(canvas.width * 0.15, 0, 10, canvas.height);
-      ctx.fillRect(canvas.width * 0.82, 0, 10, canvas.height);
-    }
-  }
-
   function drawNoise(ctx, canvas, rng, strength, color) {
     const baseAlpha = Math.max(0.025, strength * 0.4);
     for (let i = 0; i < Math.floor(canvas.width * canvas.height * strength * 0.035); i += 1) {
@@ -1790,28 +2160,6 @@
         : `rgba(0,0,0,${baseAlpha * rng()})`;
       ctx.fillRect(x, y, 1, 1);
     }
-  }
-
-  function groundStyle(id) {
-    if (id.includes("schloss") || id.includes("marktplatz") || id.includes("friedrichsplatz")) return "plaza";
-    if (id.includes("kaiser") || id.includes("ettlinger") || id.includes("zirkel") || id.includes("karl")) return "road";
-    return "plaza";
-  }
-
-  function buildingTheme(id, height) {
-    if (id.includes("schloss")) return "palace";
-    if (id.includes("stadtkirche")) return "tower";
-    if (id.includes("rathaus") || id.includes("friedrichsplatz")) return "stone";
-    if (height >= 28) return "tower";
-    if (height >= 18) return "stone";
-    return "block";
-  }
-
-  function textureRepeat(width, height, scaleX, scaleY) {
-    return {
-      x: clamp(Math.round(width / scaleX), 1, 8),
-      y: clamp(Math.round(height / scaleY), 1, 8),
-    };
   }
 
   function polygonBounds(points) {
@@ -1916,7 +2264,7 @@
             }
           : null,
         walkMesh: {
-          inside: insideWalkMesh(state.player.x, state.player.y),
+          inside: isWalkable(state.player.x, state.player.y),
           blockedLastMove: state.moveBlocked,
         },
         toggles: {
@@ -1951,16 +2299,19 @@
   }
 
   function updateSourceNote() {
-    const notes = [
-      `Quality: ${QUALITY[state.qualityMode] || state.qualityMode}.`,
-      state.useOrthophoto
-        ? "Uses free LGL orthophotos plus local 3D geometry. No API keys."
-        : "Runs fully local with no external API keys or cloud tiles.",
-    ];
+    const osmLink = document.createElement("a");
+    osmLink.href = "https://www.openstreetmap.org/copyright";
+    osmLink.target = "_blank";
+    osmLink.rel = "noopener";
+    osmLink.textContent = "© OpenStreetMap-Mitwirkende";
+    dom.sourceNote.replaceChildren(
+      "Gebaeude, Baeume, Strassen: ",
+      osmLink,
+      state.useOrthophoto ? " (ODbL). Luftbilder: LGL Baden-Wuerttemberg." : " (ODbL)."
+    );
     if (state.qualityError) {
-      notes.push(state.qualityError);
+      dom.sourceNote.append(` ${state.qualityError}`);
     }
-    dom.sourceNote.textContent = notes.join(" ");
   }
 
   function setBootStatus(text) {
@@ -1978,6 +2329,7 @@
 
   function failBoot(text, hint) {
     state.mode = "error";
+    dom.appShell.classList.add("hud-visible");
     state.qualityMode = "error";
     dom.startBtn.disabled = true;
     setBootStatus(text);

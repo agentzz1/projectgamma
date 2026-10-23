@@ -1308,6 +1308,7 @@ void main()
   function toggleMap(forceValue) {
     state.mapOpen = typeof forceValue === "boolean" ? forceValue : !state.mapOpen;
     dom.mapPanel.classList.toggle("hidden", !state.mapOpen);
+    dom.appShell.classList.toggle("map-open", state.mapOpen);
     updateHint();
     announce(state.mapOpen ? "Karte geöffnet." : "Karte geschlossen.");
   }
@@ -1457,6 +1458,7 @@ void main()
     state.inspectOpen = false;
     state.moveBlocked = false;
     dom.mapPanel.classList.add("hidden");
+    dom.appShell.classList.remove("map-open");
     dom.inspectPanel.classList.add("hidden");
     state.mode = state.started ? "explore" : "ready";
     updateWorldState();

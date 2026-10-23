@@ -155,7 +155,8 @@ button:disabled {
 
 .app-shell:not(.hud-visible) .top-row,
 .app-shell:not(.hud-visible) .time-panel,
-.app-shell:not(.hud-visible) .hint-panel {
+.app-shell:not(.hud-visible) .hint-panel,
+.app-shell.map-open .status-panel {
   visibility: hidden;
 }
 

@@ -224,6 +224,10 @@ void main()
     dom.timeSlider = document.getElementById("time-slider");
     dom.timeLabel = document.getElementById("time-label");
     dom.photoFlash = document.getElementById("photo-flash");
+    dom.touchActions = document.getElementById("touch-actions");
+    dom.mapBtn = document.getElementById("map-btn");
+    dom.infoBtn = document.getElementById("info-btn");
+    dom.travelBtn = document.getElementById("travel-btn");
   }
 
   function bindUi() {
@@ -242,6 +246,9 @@ void main()
       updateMuteButton();
     });
     dom.timeSlider.addEventListener("input", () => applyTimeOfDay(Number(dom.timeSlider.value)));
+    dom.mapBtn.addEventListener("click", () => toggleMap());
+    dom.infoBtn.addEventListener("click", () => (state.inspectOpen ? closeInspect() : toggleInspect()));
+    dom.travelBtn.addEventListener("click", () => toggleTravelMenu());
     dom.cesiumContainer.addEventListener("click", () => {
       if (state.started && !state.inspectOpen) {
         requestPointerLock();
@@ -388,7 +395,7 @@ void main()
           state.useOrthophoto = false;
           state.viewer.imageryLayers.removeAll();
           addGroundPlane();
-          state.qualityError = "Luftbilder vom LGL gerade nicht erreichbar, lokaler Boden aktiv.";
+          state.qualityError = "LGL-Luftbilder gerade nicht erreichbar";
           updateSourceNote();
           if (state.ready && !state.started) {
             setBootStatus(`Szene bereit: ${qualityLabel()}`);
@@ -1044,6 +1051,7 @@ void main()
     }
 
     dom.touchMove.classList.remove("hidden");
+    dom.touchActions.classList.remove("hidden");
 
     let moveTouchId = null;
     let lookTouchId = null;
@@ -1308,7 +1316,6 @@ void main()
   function toggleMap(forceValue) {
     state.mapOpen = typeof forceValue === "boolean" ? forceValue : !state.mapOpen;
     dom.mapPanel.classList.toggle("hidden", !state.mapOpen);
-    dom.appShell.classList.toggle("map-open", state.mapOpen);
     updateHint();
     announce(state.mapOpen ? "Karte geöffnet." : "Karte geschlossen.");
   }
@@ -1458,7 +1465,6 @@ void main()
     state.inspectOpen = false;
     state.moveBlocked = false;
     dom.mapPanel.classList.add("hidden");
-    dom.appShell.classList.remove("map-open");
     dom.inspectPanel.classList.add("hidden");
     state.mode = state.started ? "explore" : "ready";
     updateWorldState();
@@ -1784,9 +1790,15 @@ void main()
       dom.inspectTitle.textContent = state.activeLandmark.name;
       dom.inspectBody.textContent = state.activeLandmark.description;
     }
+    dom.infoBtn.disabled = !state.inspectOpen && !landmarkInReach();
+    dom.appShell.classList.toggle("overlay-open", state.mapOpen || state.travelMenuOpen || state.inspectOpen);
 
     updateHint();
     updateMiniMap();
+  }
+
+  function landmarkInReach() {
+    return Boolean(state.activeLandmark && state.activeLandmark.distance <= state.activeLandmark.radius + 36);
   }
 
   function qualityLabel() {
@@ -1800,16 +1812,24 @@ void main()
     const hints = [];
 
     if (!state.started) {
-      hints.push("Klick auf Start oder drücke Enter.");
+      hints.push(state.isTouch ? "Tippe auf „Karlsruhe betreten“." : "Klick auf Start oder drücke Enter.");
     } else if (state.inspectOpen) {
-      hints.push("E oder Escape schließt die Landmarke. Enter setzt den Startpunkt neu.");
+      hints.push(state.isTouch ? "Tippe auf Info zum Schließen." : "E oder Escape schließt die Landmarke. Enter setzt den Startpunkt neu.");
     } else if (state.travelMenuOpen) {
-      hints.push("Pfeil hoch runter wählt, Enter springt zur Landmarke, L oder Escape schließt.");
+      hints.push(state.isTouch ? "Tippe auf ein Ziel." : "Pfeil hoch runter wählt, Enter springt zur Landmarke, L oder Escape schließt.");
+    } else if (state.isTouch) {
+      hints.push("Linker Kreis: laufen. Rechts wischen: umsehen.");
+      if (landmarkInReach()) {
+        hints.push(`Info zeigt ${state.activeLandmark.name}.`);
+      }
+      if (state.moveBlocked) {
+        hints.push("Hier geht es nicht weiter.");
+      }
     } else {
       hints.push(state.pointerLocked ? "Mausblick aktiv." : "Klicke in die Szene für Mausblick.");
       hints.push("Pfeiltasten drehen oder laufen, W A S D für freie Schritte, Space sprintet.");
       hints.push("L öffnet die Ziel-Liste.");
-      if (state.activeLandmark && state.activeLandmark.distance <= state.activeLandmark.radius + 36) {
+      if (landmarkInReach()) {
         hints.push(`E öffnet ${state.activeLandmark.name}.`);
       }
       if (state.moveBlocked) {
@@ -2307,12 +2327,12 @@ void main()
     osmLink.rel = "noopener";
     osmLink.textContent = "© OpenStreetMap-Mitwirkende";
     dom.sourceNote.replaceChildren(
-      "Gebäude, Bäume, Straßen: ",
+      "Daten: ",
       osmLink,
-      state.useOrthophoto ? " (ODbL). Luftbilder: LGL Baden-Württemberg." : " (ODbL)."
+      state.useOrthophoto ? " (ODbL) · Luftbilder: LGL Baden-Württemberg" : " (ODbL)"
     );
     if (state.qualityError) {
-      dom.sourceNote.append(` ${state.qualityError}`);
+      dom.sourceNote.append(` · ${state.qualityError}`);
     }
   }
 

@@ -99,6 +99,7 @@
             Echte Luftbilder vom Land Baden-Württemberg und alle Gebäude, Bäume und Straßen
             aus OpenStreetMap. Keine API-Keys, keine bezahlten Clouds.
           </p>
+          <p class="touch-only">Am Handy: linker Kreis zum Laufen, rechts wischen zum Umsehen.</p>
         </div>
         <div class="start-grid">
           <div>
@@ -126,8 +127,14 @@
         <div class="touch-pad-knob" id="touch-move-knob"></div>
       </div>
 
+      <div id="touch-actions" class="touch-actions hidden">
+        <button id="map-btn" type="button">Karte</button>
+        <button id="info-btn" type="button" disabled>Info</button>
+        <button id="travel-btn" type="button">Ziele</button>
+      </div>
+
       <div class="source-note" id="source-note">
-        Gebäude, Bäume, Straßen: © OpenStreetMap-Mitwirkende (ODbL).
+        Daten: © OpenStreetMap-Mitwirkende (ODbL)
       </div>
       <div id="sr-status" class="sr-only" role="status" aria-live="polite"></div>
     </main>

@@ -3,63 +3,71 @@
     "id": "schloss",
     "name": "Karlsruher Schloss",
     "areaName": "Schlossbezirk",
-    "x": 0,
-    "y": 62,
+    "x": 8,
+    "y": -25,
     "radius": 120,
-    "description": "Das Schloss markiert den facherfoermigen Stadtgrundriss. Der Prototyp startet auf der Achse in Richtung Innenstadt."
+    "description": "Markgraf Karl Wilhelm von Baden-Durlach ließ das Schloss ab 1715 als Ausgangspunkt der fächerförmigen Stadtanlage errichten - 32 Straßen laufen sternförmig auf den Schlossturm zu. Das heutige Gebäude ist ein Wiederaufbau nach der Zerstörung im Zweiten Weltkrieg und beherbergt das Badische Landesmuseum.",
+    "view": [
+      8,
+      -135
+    ]
   },
   {
     "id": "schlossplatz",
     "name": "Schlossplatz",
     "areaName": "Schlossplatz",
-    "x": 0,
-    "y": -72,
+    "x": -1,
+    "y": -172,
     "radius": 135,
-    "description": "Breiter Platzraum zwischen Schloss und Innenstadt. Hier soll der Startpunkt das Gefuehl einer echten Karlsruher Blickachse erzeugen."
+    "description": "Der weite Platz vor dem Schloss öffnet den Blick auf die Fassade und den Zirkel dahinter. Er ist der nördliche Auftakt der Karl-Friedrich-Straße, der zentralen Sichtachse zwischen Schloss und Marktplatz."
   },
   {
     "id": "zirkel",
     "name": "Zirkel",
     "areaName": "Zirkel",
-    "x": -160,
-    "y": -365,
+    "x": -164,
+    "y": -373,
     "radius": 100,
-    "description": "Der Zirkel fasst den inneren Stadtbogen. In v1 dient er als seitlicher Erkundungsraum abseits der Hauptachse."
+    "description": "Der Zirkel ist der halbkreisförmige Platz direkt südlich des Schlossplatzes, an dem sich die Straßen des Fächers erstmals bündeln. Name und Form gehen auf den ursprünglichen Bebauungsplan Karlsruhes aus dem 18. Jahrhundert zurück."
   },
   {
     "id": "marktplatz",
     "name": "Marktplatz mit Pyramide",
     "areaName": "Marktplatz",
-    "x": -18,
-    "y": -560,
+    "x": -27,
+    "y": -510,
     "radius": 125,
-    "description": "Der Marktplatz ist das urbane Zentrum der v1-Route. Hier verdichten sich Rathaus, Kirche und die Kaiserstrasse."
+    "description": "Der Marktplatz wurde von Friedrich Weinbrenner um 1800 im klassizistischen Stil neu gestaltet. In seiner Mitte steht die Pyramide, die Grabstätte des Stadtgründers Karl Wilhelm. Rathaus und evangelische Stadtkirche fassen den Platz im Weinbrenner-Stil.",
+    "view": [
+      -27,
+      -548
+    ]
   },
   {
     "id": "kaiserstrasse",
-    "name": "Kaiserstrasse",
-    "areaName": "Kaiserstrasse",
-    "x": 245,
-    "y": -560,
+    "name": "Kaiserstraße",
+    "areaName": "Kaiserstraße",
+    "x": 200,
+    "y": -486,
     "radius": 130,
-    "description": "Die Kaiserstrasse bildet die Ost-West-Achse der Innenstadt. Sie ist im Walk-Mesh als frei begehbarer Boulevard angelegt."
+    "description": "Die Kaiserstraße ist die zentrale Ost-West-Einkaufsstraße der Karlsruher Innenstadt. Seit der Eröffnung der Kombilösung 2021 verläuft die Straßenbahn unterirdisch, wodurch die Straße zwischen Marktplatz und Europaplatz weitgehend autofrei ist."
   },
   {
     "id": "friedrichsplatz",
     "name": "Friedrichsplatz",
     "areaName": "Friedrichsplatz",
-    "x": -190,
-    "y": -700,
+    "x": -234,
+    "y": -647,
     "radius": 120,
-    "description": "Der Friedrichsplatz erweitert die Kernroute nach Suedwesten. Er dient als zweiter grosser Platzraum fuer freie Erkundung."
+    "description": "Der Friedrichsplatz ist eine Grünanlage südwestlich der Kaiserstraße, benannt nach Großherzog Friedrich I. Er grenzt an das Naturkundemuseum und dient als ruhiger Gegenpol zu den belebten Einkaufsstraßen."
   },
   {
     "id": "ettlinger_tor",
     "name": "Ettlinger Tor",
     "areaName": "Ettlinger Tor",
-    "x": -8,
-    "y": -870,
+    "x": -54,
+    "y": -930,
     "radius": 130,
-    "description": "Das Ettlinger Tor markiert den suedlichen Abschluss des v1-Innenstadtkerns und prueft, dass die Achse bis in die Suedstadt-Richtung begehbar bleibt."
+    "description": "Das Ettlinger Tor markiert den südlichen Abschluss der Karlsruher Fußgängerzone, dort wo einst ein Stadttor stand. Heute treffen sich hier Kaiserstraße, Ettlinger Straße und die Linien der Straßenbahn."
   }
 ]

@@ -77,6 +77,20 @@ button:disabled {
     radial-gradient(circle at 50% 78%, rgba(255, 205, 130, 0.08), transparent 25%);
 }
 
+.photo-flash {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  background: #ffffff;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 120ms ease;
+}
+
+.photo-flash.active {
+  opacity: 0.85;
+}
+
 #cesium-container,
 #cesium-container .cesium-viewer,
 #cesium-container .cesium-viewer-cesiumWidgetContainer,
@@ -90,7 +104,20 @@ button:disabled {
 #cesium-container {
   position: absolute;
   inset: 0;
+  touch-action: none;
   background: linear-gradient(180deg, #1f313d, #0f171d 62%, #182023);
+}
+
+#weather-canvas {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+  display: none;
+}
+
+#weather-canvas.active {
+  display: block;
 }
 
 #cesium-container .cesium-viewer-toolbar,
@@ -103,7 +130,9 @@ button:disabled {
 .chrome-row,
 .panel,
 .source-note,
-.start-panel {
+.start-panel,
+.touch-pad,
+.touch-actions {
   position: absolute;
   z-index: 3;
 }
@@ -119,6 +148,48 @@ button:disabled {
 .top-row {
   top: 18px;
   align-items: flex-start;
+}
+
+.chrome-row .panel {
+  position: relative;
+}
+
+.app-shell:not(.hud-visible) .top-row,
+.app-shell:not(.hud-visible) .time-panel,
+.app-shell:not(.hud-visible) .hint-panel,
+.app-shell:not(.hud-visible) .touch-pad,
+.app-shell:not(.hud-visible) .touch-actions,
+.app-shell.overlay-open .status-panel,
+.app-shell.overlay-open .time-panel,
+.app-shell.overlay-open .touch-pad {
+  visibility: hidden;
+}
+
+.touch-only {
+  display: none;
+}
+
+@media (pointer: coarse) {
+  .touch-only {
+    display: block;
+  }
+}
+
+.touch-actions {
+  right: 12px;
+  bottom: 64px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.touch-actions button {
+  min-width: 84px;
+  padding: 0.75rem 1rem;
+}
+
+.touch-actions button:disabled {
+  opacity: 0.45;
 }
 
 .panel {
@@ -144,6 +215,27 @@ button:disabled {
   padding: 16px 18px;
 }
 
+.time-panel {
+  left: 20px;
+  bottom: 185px;
+  width: min(280px, calc(100vw - 40px));
+  padding: 12px 16px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+#time-slider {
+  flex: 1;
+  accent-color: var(--accent);
+}
+
+#time-label {
+  min-width: 3.4em;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
 .map-panel {
   right: 20px;
   bottom: 24px;
@@ -158,6 +250,38 @@ button:disabled {
   width: min(540px, calc(100vw - 40px));
   padding: 22px 24px;
   background: var(--panel-strong);
+}
+
+.travel-panel {
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: min(420px, calc(100vw - 40px));
+  max-height: min(70vh, 520px);
+  padding: 22px 24px;
+  background: var(--panel-strong);
+  overflow-y: auto;
+}
+
+#travel-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+
+#travel-list li {
+  padding: 10px 14px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  cursor: pointer;
+}
+
+#travel-list li.active {
+  background: rgba(213, 173, 98, 0.18);
+  border-color: var(--accent);
 }
 
 .start-panel {
@@ -279,10 +403,9 @@ button:disabled {
   border: 1px solid rgba(255, 255, 255, 0.08);
 }
 
-#map-zones path {
-  fill: rgba(125, 196, 191, 0.18);
-  stroke: rgba(125, 196, 191, 0.7);
-  stroke-width: 1.7;
+#map-buildings path {
+  fill: rgba(222, 214, 196, 0.72);
+  stroke: none;
 }
 
 #map-landmarks circle {
@@ -315,12 +438,32 @@ button:disabled {
   backdrop-filter: blur(10px);
 }
 
+.source-note a {
+  color: inherit;
+}
+
 .hidden {
   display: none;
 }
 
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 .status-panel button {
   width: 100%;
+}
+
+#mute-btn {
+  margin-top: 8px;
 }
 
 .hint-panel p {
@@ -333,6 +476,34 @@ button:disabled {
 
 .cesium-credit-logoContainer {
   filter: brightness(1.15);
+}
+
+.touch-pad {
+  left: 20px;
+  bottom: 24px;
+  width: 116px;
+  height: 116px;
+  border-radius: 50%;
+  touch-action: none;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  backdrop-filter: blur(14px);
+  box-shadow: 0 18px 48px var(--shadow);
+}
+
+.touch-pad-knob {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 44px;
+  height: 44px;
+  margin: -22px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #f0cf87, #b98d45);
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.35);
+  transition: none;
+  pointer-events: none;
 }
 
 @media (max-width: 980px) {
@@ -349,9 +520,15 @@ button:disabled {
     max-width: 100%;
   }
 
+  .status-panel .stat-grid,
+  .status-panel .eyebrow {
+    display: none;
+  }
+
   .hint-panel,
   .map-panel,
-  .source-note {
+  .source-note,
+  .time-panel {
     left: 12px;
     right: 12px;
     max-width: none;
@@ -366,6 +543,15 @@ button:disabled {
     bottom: 54px;
   }
 
+  .touch-pad {
+    bottom: 130px;
+  }
+
+  .time-panel {
+    bottom: 250px;
+    width: auto;
+  }
+
   .source-note {
     bottom: 8px;
   }
@@ -376,7 +562,100 @@ button:disabled {
   }
 }
 
+@media (max-width: 720px), (max-height: 520px) {
+  .start-panel {
+    top: 12px;
+    transform: translateX(-50%);
+    max-height: calc(100dvh - 76px);
+    overflow-y: auto;
+    padding: 18px;
+    gap: 12px;
+  }
+
+  .start-copy h2 {
+    font-size: 1.8rem;
+  }
+
+  .start-grid,
+  .status-panel {
+    display: none;
+  }
+
+  .source-note {
+    font-size: 0.7rem;
+  }
+}
+
+@media (max-height: 520px) {
+  .hint-panel,
+  .time-panel {
+    display: none;
+  }
+
+  .chrome-row {
+    right: auto;
+    max-width: 60vw;
+  }
+
+  .location-panel {
+    padding: 10px 14px;
+  }
+
+  .location-panel h1 {
+    font-size: 1.3rem;
+  }
+
+  .touch-pad {
+    bottom: 40px;
+  }
+
+  .touch-actions {
+    bottom: 40px;
+  }
+
+  .map-panel,
+  .travel-panel,
+  .inspect-panel {
+    top: 8px;
+    bottom: 40px;
+    left: 12px;
+    right: 120px;
+    width: auto;
+    transform: none;
+    overflow-y: auto;
+  }
+
+  #map-svg {
+    width: auto;
+    height: calc(100dvh - 150px);
+    display: block;
+    margin: 0 auto;
+  }
+}
+
 @media (max-width: 720px) {
+  .hint-panel {
+    display: none;
+  }
+
+  .touch-pad,
+  .touch-actions {
+    bottom: 64px;
+  }
+
+  .map-panel,
+  .travel-panel,
+  .inspect-panel {
+    top: 12px;
+    bottom: auto;
+    left: 12px;
+    right: 12px;
+    width: auto;
+    transform: none;
+    max-height: calc(100dvh - 300px);
+    overflow-y: auto;
+  }
+
   .start-grid,
   .stat-grid {
     grid-template-columns: 1fr;
@@ -387,6 +666,11 @@ button:disabled {
   }
 
   .inspect-panel {
+    width: calc(100vw - 24px);
+    padding: 18px;
+  }
+
+  .travel-panel {
     width: calc(100vw - 24px);
     padding: 18px;
   }
